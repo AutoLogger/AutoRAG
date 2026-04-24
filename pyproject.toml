@@ -7,7 +7,7 @@ name = "autorag"
 version = "0.1.0"
 description = "Automated Retrieval-Augmented Generation toolkit with CLI and API."
 readme = "README.md"
-requires-python = "==3.12"
+requires-python = "==3.12.*"
 license = { file = "LICENSE" }
 authors = [{ name = "Kalen Cantrell" }]
 dependencies = [
