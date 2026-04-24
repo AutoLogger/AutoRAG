@@ -31,7 +31,7 @@ _RESOLVED_DEVICE: str | None = None
 
 def _torch_cuda_available() -> bool:
     try:
-        import torch  # type: ignore
+        import torch
     except Exception:
         return False
     try:
@@ -62,9 +62,9 @@ def _ensure_ffmpeg_on_path() -> None:
             import imageio_ffmpeg
 
             exe = imageio_ffmpeg.get_ffmpeg_exe()
-            ff = Path(exe)
+            ff = str(exe)
         except Exception:
-            raise RuntimeError("missing ffmpeg")
+            raise RuntimeError("missing ffmpeg") from None
 
     ff_path = Path(ff)
     ff_dir = str(ff_path.parent)
@@ -133,9 +133,7 @@ def _is_cuda_error(exc: BaseException) -> bool:
         return True
     if "out of memory" in msg:
         return True
-    if "nvml" in msg or ("driver" in msg and "cuda" in msg):
-        return True
-    return False
+    return "nvml" in msg or ("driver" in msg and "cuda" in msg)
 
 
 def transcribe_segment(

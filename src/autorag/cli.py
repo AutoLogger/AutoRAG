@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Literal
+from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, Any, Literal
 
 import typer
 
 from autorag.config import get_settings
 from autorag.core import AutoRAG
+
+if TYPE_CHECKING:
+    from autorag.orchestrator import SessionTranscriptionResult
 
 app = typer.Typer(help="AutoRAG — automated retrieval-augmented generation.")
 
@@ -50,7 +53,7 @@ def _transcribe(
     language: str = "",
     force_retranscribe: bool = False,
     db_override: Path | None = None,
-) -> tuple[list[str], dict[Any, Any], dict[Any, Any] | None, Any]:
+) -> tuple[list[str], SessionTranscriptionResult, dict[Any, Any] | None, dict[str, float]]:
     """Transcribe an audio file and output topics as a JSON list."""
     from autorag.db import Database
     from autorag.orchestrator import run_session_transcription
@@ -90,9 +93,9 @@ def _transcribe(
     )
 
     _t = _time.perf_counter()
-    words: list[dict] = result["word_spans"]
-    pending_events: list[dict] = result["pending_events"]
-    db.store_transcription(session_id, words)
+    words = result["word_spans"]
+    pending_events = result["pending_events"]
+    db.store_transcription(session_id, words)  # type: ignore[arg-type]
     cli_store_words_s = _time.perf_counter() - _t
 
     transcript_end_s = 0.0
@@ -192,7 +195,7 @@ def transcribe(
         file,
         title,
         whisper_model,
-        provider,
+        provider,  # type: ignore[arg-type]
         llm_model,
         language,
         force_retranscribe,

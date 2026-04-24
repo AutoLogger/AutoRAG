@@ -7,11 +7,12 @@ import pathlib
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import umap
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sklearn.metrics.pairwise import cosine_similarity as sk_cosine
+from sklearn.metrics.pairwise import cosine_similarity as sk_cosine  # type: ignore[import-untyped]
 
 from autorag.config import get_settings
 from autorag.db import Database
@@ -73,9 +74,9 @@ class SearchResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def umap_3d(embeddings: list[list[float]]) -> np.ndarray:
-    E = np.array(embeddings, dtype=np.float64)
-    n = len(E)
+def umap_3d(embeddings: list[list[float]]) -> npt.NDArray[np.float64]:
+    emb = np.array(embeddings, dtype=np.float64)
+    n = len(emb)
     if n == 1:
         return np.zeros((1, 3))
     n_components = min(3, n - 1)
@@ -86,7 +87,8 @@ def umap_3d(embeddings: list[list[float]]) -> np.ndarray:
         n_neighbors=n_neighbors,
         random_state=42,
     )
-    coords = reducer.fit_transform(E)
+    coords: npt.NDArray[np.float64]
+    coords = reducer.fit_transform(emb)
     if coords.shape[1] < 3:
         coords = np.pad(coords, ((0, 0), (0, 3 - coords.shape[1])))
     return coords  # (N, 3)
@@ -98,10 +100,10 @@ def umap_3d(embeddings: list[list[float]]) -> np.ndarray:
 
 
 def _collect_rows_embeddings(
-    clips: list[dict],
-) -> tuple[list[tuple[str, str, dict]], list[list[float]]]:
+    clips: list[dict[str, Any]],
+) -> tuple[list[tuple[str, str, dict[str, Any]]], list[list[float]]]:
     """Build (rows, embeddings) from clip records, filling missing vecs via Ollama."""
-    rows: list[tuple[str, str, dict]] = []
+    rows: list[tuple[str, str, dict[str, Any]]] = []
     for clip in clips:
         raw = clip.get("topics")
         if not raw:
@@ -125,7 +127,7 @@ def _collect_rows_embeddings(
             continue
         try:
             emb_list: list[list[float]] = json.loads(raw_emb)
-            topic_list: list[dict] = json.loads(raw_topics)
+            topic_list: list[dict[str, Any]] = json.loads(raw_topics)
             stored[clip["id"]] = {
                 t["title"]: emb_list[i]
                 for i, t in enumerate(topic_list)
@@ -151,7 +153,7 @@ def _collect_rows_embeddings(
             for idx in missing_indices
         ]
         computed = embed_topic_titles(missing_texts)
-        for idx, vec in zip(missing_indices, computed):
+        for idx, vec in zip(missing_indices, computed, strict=False):
             embeddings[idx] = vec
 
     return rows, [e for e in embeddings if e is not None]
@@ -163,7 +165,7 @@ def _collect_rows_embeddings(
 
 
 @router.get("/viz", response_class=HTMLResponse, include_in_schema=False)
-def viz_page() -> Any:
+def viz_page() -> HTMLResponse:
     return HTMLResponse(_HTML_PATH.read_text(encoding="utf-8"))
 
 
@@ -178,7 +180,7 @@ def viz_data(
     try:
         rows, embeddings = _collect_rows_embeddings(clips)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if not rows:
         return VizData(
@@ -244,7 +246,7 @@ def viz_search(
     try:
         query_vec = embed_topic_titles([q])[0]
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     settings = get_settings()
     db = Database(settings.db_path.expanduser())
@@ -253,7 +255,7 @@ def viz_search(
     try:
         rows, embeddings = _collect_rows_embeddings(clips)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if not rows:
         return []

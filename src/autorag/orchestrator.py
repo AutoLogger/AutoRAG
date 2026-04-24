@@ -12,10 +12,9 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from autorag import whisper_runner
-from autorag.db import Database
 from autorag.providers import (
     PROVIDER_DEFAULT_MODELS,
     Topic,
@@ -25,10 +24,43 @@ from autorag.providers import (
 )
 from autorag.signatures import compute_audio_signature
 
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from autorag.db import Database
+
 logger = logging.getLogger(__name__)
 
 # v1 safety cap: drop words beyond ~90 minutes into the session.
 MAX_TRANSCRIPT_SECONDS = 90 * 60
+
+
+# --------------------------------------------------------------------------- #
+# Result types                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+class TranscriptSegment(TypedDict):
+    id: str
+    started_at_utc: str | None
+    words: list[dict[str, Any]]
+
+
+class TranscriptPayload(TypedDict):
+    segments: list[TranscriptSegment]
+
+
+class SessionTranscriptionResult(TypedDict):
+    inserted: int
+    levels: list[int]
+    transcript_cached: bool
+    provider: Literal["anthropic", "openai", "gemini", "ollama"]
+    llm_model: str
+    device_used: str
+    duration_secs: float
+    timings: dict[str, float]
+    word_spans: list[WordSpan]
+    pending_events: list[dict[str, Any]]
 
 
 # --------------------------------------------------------------------------- #
@@ -73,14 +105,16 @@ def _resolve_segment_file(db: Any, session_id: str, segment_id: str) -> tuple[Pa
     if resolver is None:
         return None
     try:
-        return resolver(session_id, segment_id)
+        return resolver(session_id, segment_id)  # type: ignore[no-any-return]
     except Exception:  # pragma: no cover - defensive
         return None
 
 
-def _enrich_segments(db: Any, session_id: str, segments: list[dict]) -> list[dict]:
+def _enrich_segments(
+    db: Any, session_id: str, segments: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Attach `file_path` and `file_size` to each segment (best effort)."""
-    enriched: list[dict] = []
+    enriched: list[dict[str, Any]] = []
     for seg in segments:
         out = dict(seg)
         seg_id = str(seg.get("id") or "")
@@ -105,15 +139,15 @@ def _enrich_segments(db: Any, session_id: str, segments: list[dict]) -> list[dic
 
 
 def _run_whisper_on_segments(
-    segments: list[dict], whisper_model: str, language: str | None
-) -> tuple[dict, float, float]:
+    segments: list[dict[str, Any]], whisper_model: str, language: str | None
+) -> tuple[TranscriptPayload, float, float]:
     """Run Whisper over every segment and return (cache payload, model_load_s, transcription_s)."""
     t0 = time.perf_counter()
     model = whisper_runner.get_model(whisper_model)
     model_load_s = time.perf_counter() - t0
 
     transcription_s = 0.0
-    out_segments: list[dict] = []
+    out_segments: list[TranscriptSegment] = []
     for seg in segments:
         file_path = seg.get("file_path")
         if not file_path or not Path(file_path).is_file():
@@ -136,7 +170,7 @@ def _run_whisper_on_segments(
     return {"segments": out_segments}, model_load_s, transcription_s
 
 
-def _flatten_words(transcript: dict, audio_start_wall: datetime) -> list[WordSpan]:
+def _flatten_words(transcript: TranscriptPayload, audio_start_wall: datetime) -> list[WordSpan]:
     spans: list[WordSpan] = []
     for seg in transcript.get("segments", []) or []:
         seg_started = _parse_utc(seg.get("started_at_utc"))
@@ -199,14 +233,18 @@ def _collapse_lone_children(tree: TopicTree) -> TopicTree:
     return {"topics": walk(tree.get("topics") or [])}
 
 
-def _iter_topics_flat(tree: TopicTree):
+def _iter_topics_flat(
+    tree: TopicTree,
+) -> Generator[tuple[int, Topic, str], None, None]:
     """Yield (level, topic_dict, number_label).
 
     `number_label` is a hierarchical sibling index like "1", "1.2", "1.2.3"
     that skips empty-title nodes so the numbering stays gap-free.
     """
 
-    def walk(nodes: list[Topic], level: int, parent_number: str):
+    def walk(
+        nodes: list[Topic], level: int, parent_number: str
+    ) -> Generator[tuple[int, Topic, str], None, None]:
         sibling_count = 0
         for node in nodes:
             title = str(node.get("title", "") or "").strip()
@@ -240,7 +278,7 @@ def run_session_transcription(
     replace_existing: bool,
     force_retranscribe: bool,
     topic_category_ids: tuple[str, str, str],
-) -> dict:
+) -> SessionTranscriptionResult:
     """Run the full transcribe -> summarize -> fanout pipeline."""
     start_wall_time = time.monotonic()
     timings: dict[str, float] = {}
@@ -269,14 +307,14 @@ def run_session_transcription(
     timings["cache_lookup"] = time.perf_counter() - _t
 
     transcript_cached = False
-    transcript_payload: dict
+    transcript_payload: TranscriptPayload
     if (
         cached is not None
         and not force_retranscribe
         and str(cached.get("audio_signature")) == signature
         and isinstance(cached.get("transcript_json"), dict)
     ):
-        transcript_payload = cached["transcript_json"]  # type: ignore[assignment]
+        transcript_payload = cached["transcript_json"]
         transcript_cached = True
         timings["whisper_model_load"] = 0.0
         timings["whisper_transcription"] = 0.0
@@ -295,7 +333,7 @@ def run_session_transcription(
                 whisper_model=whisper_model,
                 language=language,
                 audio_signature=signature,
-                transcript_json=transcript_payload,
+                transcript_json=transcript_payload,  # type: ignore[arg-type]
                 generated_at_utc=now_iso,
             )
         except Exception as exc:  # pragma: no cover - defensive
@@ -348,7 +386,7 @@ def run_session_transcription(
     }
     inserted = 0
     level_counts = [0, 0, 0]
-    pending_events: list[dict] = []
+    pending_events: list[dict[str, Any]] = []
 
     for level, node, number_label in _iter_topics_flat(tree):
         title = str(node.get("title", "") or "").strip()

@@ -21,18 +21,17 @@ Always use `uv`, never `pip` directly:
 - Every module begins with `from __future__ import annotations`.
 - Pydantic v2 `BaseModel` for API schemas; `SettingsConfigDict` for config.
 - `TypedDict` in `providers.py` for `WordSpan`, `Topic`, `TopicTree` — extend this pattern for new typed dicts.
+- `TypedDict` in `orchestrator.py` for `TranscriptSegment`, `TranscriptPayload`, `SessionTranscriptionResult`.
 - `Protocol` used for `LLMProvider` — use Protocol for new abstract interfaces, not ABC.
-
-## Type Annotation Gaps (fix opportunistically when touching these files)
-
-- `orchestrator.py` — `run_session_transcription` returns untyped `dict`; define a `TypedDict` for it
-- `whisper_runner.py` — Whisper has no stubs; `Any` is unavoidable; leave with `# type: ignore[import-untyped]`
-- `viz.py` — use `npt.NDArray[np.float64]` from `numpy.typing` for numpy return types
+- `numpy.typing.NDArray[np.float64]` for numpy array return types (see `viz.umap_3d`).
 
 ## Third-Party Stubs
 
 These packages have no stubs — covered by mypy `ignore_missing_imports` overrides:
 - `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`
+
+These packages have no stubs — suppress with `# type: ignore[import-untyped]` at the import site:
+- `sklearn` (used in `viz.py` and `topic_cluster.py`)
 
 ## Static Analysis Commands
 

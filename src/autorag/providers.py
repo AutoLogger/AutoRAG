@@ -53,6 +53,7 @@ class Topic(TypedDict, total=False):
     title: str
     summary: str
     start_s: float
+    end_s: float
     children: list[Topic]
 
 
@@ -71,7 +72,7 @@ PROVIDER_DEFAULT_MODELS: dict[str, str] = {
 }
 
 
-def OLLAMA_BASE_URL() -> str:
+def OLLAMA_BASE_URL() -> str:  # noqa: N802
     """Resolve the Ollama base URL from env, falling back to localhost."""
     raw = os.environ.get("AUTOLOGGER_OLLAMA_BASE_URL", "").strip()
     return raw or "http://localhost:11434"
@@ -91,9 +92,7 @@ def provider_configured(name: str) -> bool:
         return bool(os.environ.get("AUTOLOGGER_OPENAI_API_KEY", "").strip())
     if key == "gemini":
         return bool(os.environ.get("AUTOLOGGER_GEMINI_API_KEY", "").strip())
-    if key == "ollama":
-        return True
-    return False
+    return key == "ollama"
 
 
 # ----------------------------------------------------------------------------- #
@@ -476,7 +475,7 @@ class OllamaProvider:
 
     def summarize(self, transcript: list[WordSpan], levels: int, prompt_extras: str) -> TopicTree:
         try:
-            import httpx  # type: ignore
+            import httpx
         except ImportError as exc:
             raise RuntimeError("The `httpx` package is not installed.") from exc
 
