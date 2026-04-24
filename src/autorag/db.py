@@ -26,6 +26,7 @@ class AudioClip(BaseModel):
     whisper_model: Optional[str] = None
     provider: Optional[str] = None
     llm_model: Optional[str] = None
+    embeddings: Optional[str] = None
 
 
 class Database:
@@ -102,6 +103,7 @@ class Database:
             "level": int(tx.get("level") or 1),
             "start_s": float(tx.get("word_start_s") or 0.0),
             "number_label": str(tx.get("number_label") or ""),
+            "summary": str(tx.get("summary") or ""),
             "marked_at_utc": marked_at_utc,
         }
 
@@ -168,6 +170,7 @@ class Database:
                 "start_s": ev["start_s"],
                 "duration_s": ev.get("duration_s", 0.0),
                 "number": ev["number_label"],
+                "summary": ev.get("summary", ""),
             }
             for ev in events
         ]
@@ -180,6 +183,13 @@ class Database:
         clip.provider = provider
         clip.llm_model = llm_model
         clip.whisper_model = whisper_model
+        self.db.add(_TABLE, clip, pk="id")
+
+    def store_embeddings(self, session_id: str, embeddings: list[list[float]]) -> None:
+        clip = self._row(session_id)
+        if clip is None:
+            return
+        clip.embeddings = json.dumps(embeddings)
         self.db.add(_TABLE, clip, pk="id")
 
     def get_clip(self, session_id: str) -> Optional[dict]:

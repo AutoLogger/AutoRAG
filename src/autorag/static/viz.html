@@ -11,14 +11,16 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:        #020409;
-    --panel-bg:  rgba(4, 8, 20, 0.78);
-    --border:    rgba(80, 140, 255, 0.15);
+    --bg:        #0d1117;
+    --rail-bg:   rgba(8, 12, 22, 0.92);
+    --panel-bg:  rgba(13, 17, 30, 0.82);
+    --border:    rgba(80, 140, 255, 0.22);
     --text-hi:   #ddeeff;
-    --text-lo:   #4a6a8a;
+    --text-lo:   #5a7a9a;
     --mono:      'JetBrains Mono', monospace;
     --sans:      'Space Grotesk', sans-serif;
     --accent:    rgba(90, 160, 255, 0.9);
+    --rail-w:    290px;
   }
 
   html, body {
@@ -35,39 +37,55 @@
     width: 100% !important; height: 100% !important;
   }
 
-  /* ── UI panel ── */
-  #panel {
-    position: fixed; top: 24px; left: 24px; z-index: 10;
-    width: 248px;
-    background: var(--panel-bg);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px 20px;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+  /* ── Left rail ────────────────────────────────────────────────────────── */
+  #rail {
+    position: fixed;
+    left: 0; top: 0;
+    width: var(--rail-w);
+    height: 100vh;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    background: var(--rail-bg);
+    border-right: 1px solid var(--border);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
   }
 
-  #panel h1 {
+  #rail-header {
+    padding: 22px 20px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #rail-header h1 {
     font-weight: 300;
-    font-size: 0.78rem;
-    letter-spacing: 0.22em;
+    font-size: 0.70rem;
+    letter-spacing: 0.26em;
     text-transform: uppercase;
     color: var(--accent);
-    margin-bottom: 4px;
+    margin-bottom: 5px;
   }
 
   #stats {
     font-family: var(--mono);
-    font-size: 0.68rem;
+    font-size: 0.63rem;
     color: var(--text-lo);
-    margin-bottom: 14px;
   }
 
-  #legend { display: flex; flex-direction: column; gap: 7px; }
+  /* ── Clip legend ── */
+  #legend {
+    padding: 12px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
 
   .legend-row {
     display: flex; align-items: center; gap: 9px;
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     color: var(--text-hi);
     white-space: nowrap;
     overflow: hidden;
@@ -75,12 +93,246 @@
 
   .legend-dot {
     flex-shrink: 0;
-    width: 10px; height: 10px;
+    width: 8px; height: 8px;
     border-radius: 50%;
-    box-shadow: 0 0 6px currentColor;
+    box-shadow: 0 0 5px currentColor;
   }
 
-  .legend-label { overflow: hidden; text-overflow: ellipsis; }
+  .legend-label { overflow: hidden; text-overflow: ellipsis; font-size: 0.70rem; }
+
+  /* ── Size legend strip ── */
+  #size-legend {
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 14px; align-items: center;
+    flex-shrink: 0;
+  }
+
+  .size-row {
+    display: flex; align-items: center; gap: 5px;
+    font-family: var(--mono); font-size: 0.60rem; color: var(--text-lo);
+  }
+
+  .size-dot {
+    background: rgba(150,180,255,0.5);
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Controls buttons ── */
+  #controls {
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .ctrl-btn {
+    font-family: var(--mono);
+    font-size: 0.60rem;
+    letter-spacing: 0.06em;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-lo);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+  }
+
+  .ctrl-btn:hover,
+  .ctrl-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── Search box ── */
+  #search-wrap {
+    padding: 8px 20px 6px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #search-input {
+    width: 100%;
+    background: rgba(8, 12, 22, 0.7);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-hi);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 6px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  #search-input:focus { border-color: var(--accent); }
+  #search-input::placeholder { color: var(--text-lo); }
+
+  #search-results {
+    margin-top: 4px;
+    max-height: 160px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #search-results::-webkit-scrollbar { width: 2px; }
+  #search-results::-webkit-scrollbar-track { background: transparent; }
+  #search-results::-webkit-scrollbar-thumb {
+    background: rgba(80, 140, 255, 0.25);
+    border-radius: 2px;
+  }
+
+  .search-hit {
+    padding: 4px 4px;
+    font-size: 0.68rem;
+    color: var(--text-hi);
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+    transition: background 0.1s;
+  }
+
+  .search-hit:hover { background: rgba(90, 160, 255, 0.10); }
+
+  .search-hit-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    font-size: 0.67rem;
+  }
+
+  .search-hit-score {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    color: var(--text-lo);
+    flex-shrink: 0;
+  }
+
+  /* ── Topic list ── */
+  #topic-list-header {
+    padding: 10px 20px 6px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  #topic-list-label {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-lo);
+  }
+
+  #topic-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 16px;
+  }
+
+  #topic-list::-webkit-scrollbar { width: 2px; }
+  #topic-list::-webkit-scrollbar-track { background: transparent; }
+  #topic-list::-webkit-scrollbar-thumb {
+    background: rgba(80, 140, 255, 0.25);
+    border-radius: 2px;
+  }
+
+  .clip-section { margin-bottom: 2px; }
+
+  .clip-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 20px 5px 16px;
+    border-left: 2px solid var(--clip-color, var(--accent));
+    margin: 4px 0 2px 12px;
+  }
+
+  .clip-section-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .clip-section-name {
+    font-size: 0.69rem;
+    font-weight: 600;
+    color: var(--text-hi);
+    letter-spacing: 0.03em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topic-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 16px 3px 24px;
+    cursor: pointer;
+    transition: background 0.12s, box-shadow 0.12s;
+    position: relative;
+  }
+
+  .topic-row::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: transparent;
+    transition: background 0.12s;
+  }
+
+  .topic-row:hover::before,
+  .topic-row.active::before {
+    background: var(--row-color, var(--accent));
+  }
+
+  .topic-row:hover,
+  .topic-row.active {
+    background: var(--row-hover-bg, rgba(90, 140, 255, 0.07));
+  }
+
+  .level-badge {
+    font-family: var(--mono);
+    font-size: 0.55rem;
+    color: var(--text-lo);
+    flex-shrink: 0;
+    width: 16px;
+  }
+
+  .topic-num {
+    font-family: var(--mono);
+    font-size: 0.60rem;
+    color: var(--text-lo);
+    flex-shrink: 0;
+    min-width: 24px;
+  }
+
+  .topic-name {
+    font-size: 0.72rem;
+    color: var(--text-hi);
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .level-2 { padding-left: 32px; }
+  .level-2 .topic-name { font-size: 0.69rem; color: rgba(200, 220, 255, 0.78); }
+
+  .level-3 { padding-left: 40px; }
+  .level-3 .topic-name { font-size: 0.64rem; color: var(--text-lo); }
 
   /* ── Tooltip ── */
   #tooltip {
@@ -89,7 +341,7 @@
     z-index: 20;
     pointer-events: none;
     max-width: 290px;
-    background: rgba(4, 9, 22, 0.94);
+    background: rgba(13, 17, 30, 0.95);
     border: 1px solid rgba(90, 150, 255, 0.28);
     border-radius: 7px;
     padding: 10px 14px;
@@ -109,6 +361,15 @@
     font-size: 0.68rem;
     color: var(--text-lo);
     line-height: 1.6;
+  }
+
+  .tt-summary {
+    font-size: 0.75rem;
+    color: #8aabcc;
+    line-height: 1.55;
+    margin-top: 7px;
+    border-top: 1px solid rgba(90, 150, 255, 0.15);
+    padding-top: 7px;
   }
 
   /* ── Loading / Empty overlays ── */
@@ -145,32 +406,13 @@
   }
 
   .pulse { animation: pulse 2.4s ease-in-out infinite; }
-
-  /* ── Level size legend ── */
-  #size-legend {
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-    display: flex; gap: 12px; align-items: center;
-  }
-
-  .size-row {
-    display: flex; align-items: center; gap: 6px;
-    font-family: var(--mono); font-size: 0.64rem; color: var(--text-lo);
-  }
-
-  .size-dot {
-    background: rgba(150,180,255,0.6);
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
 </style>
 </head>
 <body>
 
 <div id="loading-overlay" class="overlay visible">
   <div class="overlay-icon"></div>
-  <div class="overlay-text">computing embeddings…</div>
+  <div class="overlay-text">loading visualization…</div>
 </div>
 
 <div id="empty-overlay" class="overlay">
@@ -181,20 +423,35 @@
   <div class="overlay-text" id="error-msg" style="color:#ff6b6b;max-width:400px;text-align:center;line-height:1.6"></div>
 </div>
 
-<div id="panel">
-  <h1>Topic Constellation</h1>
-  <div id="stats">—</div>
+<div id="rail">
+  <div id="rail-header">
+    <h1>Topic Constellation</h1>
+    <div id="stats">—</div>
+  </div>
   <div id="legend"></div>
   <div id="size-legend">
-    <div class="size-row"><div class="size-dot" style="width:10px;height:10px"></div>L1</div>
-    <div class="size-row"><div class="size-dot" style="width:7px;height:7px"></div>L2</div>
-    <div class="size-row"><div class="size-dot" style="width:5px;height:5px"></div>L3</div>
+    <div class="size-row"><div class="size-dot" style="width:9px;height:9px"></div>L1</div>
+    <div class="size-row"><div class="size-dot" style="width:6px;height:6px"></div>L2</div>
+    <div class="size-row"><div class="size-dot" style="width:4px;height:4px"></div>L3</div>
   </div>
+  <div id="controls">
+    <button class="ctrl-btn" id="btn-color-mode">Color: By Clip</button>
+    <button class="ctrl-btn" id="btn-edges">Edges: Hidden</button>
+  </div>
+  <div id="search-wrap">
+    <input id="search-input" type="text" placeholder="search topics…" autocomplete="off"/>
+    <div id="search-results"></div>
+  </div>
+  <div id="topic-list-header">
+    <span id="topic-list-label">Topics</span>
+  </div>
+  <div id="topic-list"></div>
 </div>
 
 <div id="tooltip">
   <div class="tt-title" id="tt-title"></div>
   <div class="tt-meta" id="tt-meta"></div>
+  <div class="tt-summary" id="tt-summary"></div>
 </div>
 
 <canvas id="canvas"></canvas>
@@ -211,7 +468,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// ── Palette: one colour per clip ──────────────────────────────────────────
+// ── Palettes ──────────────────────────────────────────────────────────────
 const PALETTE = [
   0x7B61FF, // electric violet
   0x00D9FF, // cyan
@@ -223,9 +480,24 @@ const PALETTE = [
   0xFF8C00, // orange
 ];
 
+const CLUSTER_PALETTE = [
+  0xFFE156, // yellow
+  0xFF7F50, // coral-orange
+  0x98FF98, // mint
+  0xFFB6C1, // light pink
+  0xADD8E6, // light blue
+  0xDDA0DD, // plum
+  0x90EE90, // light green
+  0xF0E68C, // khaki
+  0xE0FFFF, // light cyan
+  0xFFA07A, // light salmon
+  0xB0C4DE, // steel blue
+  0x20B2AA, // light sea green
+];
+
 // ── Point sizes by level ──────────────────────────────────────────────────
-const LEVEL_SIZE = { 1: 0.22, 2: 0.14, 3: 0.09 };
-const LEVEL_OPACITY = { 1: 1.0, 2: 0.75, 3: 0.55 };
+const LEVEL_SIZE    = { 1: 0.35, 2: 0.22, 3: 0.15 };
+const LEVEL_OPACITY = { 1: 1.0,  2: 0.90, 3: 0.75 };
 
 // ── Scene setup ───────────────────────────────────────────────────────────
 const canvas = document.getElementById('canvas');
@@ -233,11 +505,11 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.3;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020409);
-scene.fog = new THREE.FogExp2(0x020409, 0.035);
+scene.background = new THREE.Color(0x0d1117);
+scene.fog = new THREE.FogExp2(0x0d1117, 0.018);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 600);
 camera.position.set(0, 0, 9);
@@ -245,20 +517,9 @@ camera.position.set(0, 0, 9);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.autoRotate = true;
-controls.autoRotateSpeed = 0.35;
+controls.autoRotate = false;
 controls.minDistance = 1;
 controls.maxDistance = 80;
-
-let resumeTimer = null;
-controls.addEventListener('start', () => {
-  controls.autoRotate = false;
-  clearTimeout(resumeTimer);
-});
-controls.addEventListener('end', () => {
-  clearTimeout(resumeTimer);
-  resumeTimer = setTimeout(() => { controls.autoRotate = true; }, 4000);
-});
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -283,35 +544,73 @@ function makeGlowTexture() {
 }
 const glowTex = makeGlowTexture();
 
+// ── Highlight mesh (rail hover → 3D point glow) ───────────────────────────
+const highlightGeo = new THREE.BufferGeometry();
+highlightGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+const highlightMat = new THREE.PointsMaterial({
+  color: 0xffffff,
+  size: 0.65,
+  map: glowTex,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true,
+  opacity: 0.95,
+  sizeAttenuation: true,
+});
+const highlightMesh = new THREE.Points(highlightGeo, highlightMat);
+highlightMesh.visible = false;
+scene.add(highlightMesh);
+let highlightPhase = 0;
+
+// world position lookup: `${clip_id}|${topic_title}` → {x, y, z}
+const worldPositions = new Map();
+
+// index-parallel to data.points, for edge and search rendering
+let pointWorldPositions = [];
+
+// ── State for toggles and search ─────────────────────────────────────────
+let colorMode = 'clip';
+let edgesVisible = false;
+let edgeMesh = null;
+let searchHighlightMesh = null;
+let currentData = null;
+
+// pointsGroups: Array<{ mesh, data, colorBuf, indices }>
+let pointsGroups = [];
+
 // ── Background starfield ──────────────────────────────────────────────────
 function addStarfield() {
-  const N = 2000;
+  const N = 800;
   const pos = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi   = Math.acos(2 * Math.random() - 1);
-    const r     = 60 + Math.random() * 50;
+    const r     = 70 + Math.random() * 40;
     pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
     pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
     pos[i*3+2] = r * Math.cos(phi);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.07, sizeAttenuation: true });
+  const mat = new THREE.PointsMaterial({ color: 0x8899bb, size: 0.04, sizeAttenuation: true });
   scene.add(new THREE.Points(geo, mat));
 }
 addStarfield();
+
+const grid = new THREE.GridHelper(20, 24, 0x1e2d45, 0x1e2d45);
+grid.position.y = -4.5;
+grid.material.transparent = true;
+grid.material.opacity = 0.30;
+scene.add(grid);
 
 // ── Raycasting state ──────────────────────────────────────────────────────
 const raycaster = new THREE.Raycaster();
 raycaster.params.Points.threshold = 0.18;
 const mouse = new THREE.Vector2();
-const tooltip = document.getElementById('tooltip');
-const ttTitle = document.getElementById('tt-title');
-const ttMeta  = document.getElementById('tt-meta');
-
-// pointsGroups: Array<{ mesh: THREE.Points, data: TopicPoint[] }>
-let pointsGroups = [];
+const tooltip   = document.getElementById('tooltip');
+const ttTitle   = document.getElementById('tt-title');
+const ttMeta    = document.getElementById('tt-meta');
+const ttSummary = document.getElementById('tt-summary');
 
 window.addEventListener('pointermove', e => {
   mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
@@ -336,7 +635,13 @@ window.addEventListener('pointermove', e => {
     ttTitle.textContent = pt.topic_title;
     ttMeta.innerHTML =
       `${pt.clip_title}<br>` +
-      `L${pt.level} · ${pt.number} · ${pt.start_s.toFixed(1)}s`;
+      `L${pt.level} · cluster ${pt.cluster_id} · ${pt.number} · ${pt.start_s.toFixed(1)}s`;
+    if (pt.summary) {
+      ttSummary.textContent = pt.summary;
+      ttSummary.style.display = 'block';
+    } else {
+      ttSummary.style.display = 'none';
+    }
   } else {
     tooltip.style.display = 'none';
   }
@@ -345,97 +650,321 @@ window.addEventListener('pointermove', e => {
 // ── Build scene from data ─────────────────────────────────────────────────
 function buildScene(data) {
   pointsGroups = [];
+  worldPositions.clear();
+  pointWorldPositions = new Array(data.points.length);
 
   const pts = data.points;
   if (pts.length === 0) return;
 
-  // Normalise coordinates into [-4, 4]
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y), zs = pts.map(p => p.z);
-  const ranges = [
+  const maxRange = Math.max(
     Math.max(...xs) - Math.min(...xs),
     Math.max(...ys) - Math.min(...ys),
     Math.max(...zs) - Math.min(...zs),
-  ];
-  const maxRange = Math.max(...ranges, 1e-6);
+    1e-6
+  );
   const scale = 7.0 / maxRange;
   const cx = (Math.max(...xs) + Math.min(...xs)) / 2;
   const cy = (Math.max(...ys) + Math.min(...ys)) / 2;
   const cz = (Math.max(...zs) + Math.min(...zs)) / 2;
 
-  // Group points by (clip_id, level)
-  const groups = new Map(); // key: `${clip_idx}_${level}` -> { color, size, opacity, positions, data }
   const clipIdx = Object.fromEntries(data.clip_ids.map((id, i) => [id, i]));
 
-  for (const pt of pts) {
-    const ci = clipIdx[pt.clip_id] ?? 0;
-    const key = `${ci}_${pt.level}`;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        color:   PALETTE[ci % PALETTE.length],
-        size:    LEVEL_SIZE[pt.level]   ?? 0.09,
-        opacity: LEVEL_OPACITY[pt.level] ?? 0.5,
-        positions: [],
-        data: [],
-      });
+  // Group by level (vertexColors lets us swap colors without rebuilding geometry)
+  const byLevel = new Map();
+
+  for (let i = 0; i < pts.length; i++) {
+    const pt = pts[i];
+    const px = (pt.x - cx) * scale;
+    const py = (pt.y - cy) * scale;
+    const pz = (pt.z - cz) * scale;
+
+    if (!byLevel.has(pt.level)) {
+      byLevel.set(pt.level, { positions: [], colors: [], data: [], indices: [] });
     }
-    const g = groups.get(key);
-    g.positions.push(
-      (pt.x - cx) * scale,
-      (pt.y - cy) * scale,
-      (pt.z - cz) * scale,
-    );
+    const g = byLevel.get(pt.level);
+    g.positions.push(px, py, pz);
     g.data.push(pt);
+    g.indices.push(i);
+
+    const ci = clipIdx[pt.clip_id] ?? 0;
+    const hex = PALETTE[ci % PALETTE.length];
+    g.colors.push(((hex >> 16) & 0xff) / 255, ((hex >> 8) & 0xff) / 255, (hex & 0xff) / 255);
+
+    worldPositions.set(`${pt.clip_id}|${pt.topic_title}`, { x: px, y: py, z: pz });
+    pointWorldPositions[i] = { x: px, y: py, z: pz };
   }
 
-  for (const [, g] of groups) {
-    const pos = new Float32Array(g.positions);
+  for (const [level, g] of byLevel) {
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g.positions), 3));
+    const colorBuf = new Float32Array(g.colors);
+    geo.setAttribute('color', new THREE.BufferAttribute(colorBuf, 3));
 
     const mat = new THREE.PointsMaterial({
-      color:       g.color,
-      size:        g.size,
-      map:         glowTex,
-      blending:    THREE.AdditiveBlending,
-      depthWrite:  false,
-      transparent: true,
-      opacity:     g.opacity,
+      size:         LEVEL_SIZE[level] ?? 0.09,
+      map:          glowTex,
+      blending:     THREE.AdditiveBlending,
+      depthWrite:   false,
+      transparent:  true,
+      opacity:      LEVEL_OPACITY[level] ?? 0.5,
       sizeAttenuation: true,
+      vertexColors: true,
     });
 
     const mesh = new THREE.Points(geo, mat);
     scene.add(mesh);
-    pointsGroups.push({ mesh, data: g.data });
+    pointsGroups.push({ mesh, data: g.data, colorBuf, indices: g.indices });
   }
 }
 
-// ── Legend ────────────────────────────────────────────────────────────────
+// ── Color mode toggle ─────────────────────────────────────────────────────
+function applyColorMode(data) {
+  const clipIdx = Object.fromEntries(data.clip_ids.map((id, i) => [id, i]));
+  for (const g of pointsGroups) {
+    for (let i = 0; i < g.data.length; i++) {
+      const pt = g.data[i];
+      const hex = colorMode === 'clip'
+        ? PALETTE[(clipIdx[pt.clip_id] ?? 0) % PALETTE.length]
+        : CLUSTER_PALETTE[pt.cluster_id % CLUSTER_PALETTE.length];
+      g.colorBuf[i * 3]     = ((hex >> 16) & 0xff) / 255;
+      g.colorBuf[i * 3 + 1] = ((hex >> 8)  & 0xff) / 255;
+      g.colorBuf[i * 3 + 2] = (hex & 0xff) / 255;
+    }
+    g.mesh.geometry.attributes.color.needsUpdate = true;
+  }
+  colorMode === 'cluster' ? buildClusterLegend(data) : buildLegend(data);
+}
+
+// ── Edge mesh (knowledge graph connections) ───────────────────────────────
+function buildEdgeMesh(data) {
+  if (edgeMesh) {
+    scene.remove(edgeMesh);
+    edgeMesh.geometry.dispose();
+    edgeMesh.material.dispose();
+    edgeMesh = null;
+  }
+  if (!data.edges || data.edges.length === 0) return;
+
+  const positions = new Float32Array(data.edges.length * 6);
+  for (let i = 0; i < data.edges.length; i++) {
+    const { a, b } = data.edges[i];
+    const pa = pointWorldPositions[a];
+    const pb = pointWorldPositions[b];
+    if (!pa || !pb) continue;
+    positions[i * 6]     = pa.x;
+    positions[i * 6 + 1] = pa.y;
+    positions[i * 6 + 2] = pa.z;
+    positions[i * 6 + 3] = pb.x;
+    positions[i * 6 + 4] = pb.y;
+    positions[i * 6 + 5] = pb.z;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.LineBasicMaterial({
+    color: 0x4488cc,
+    transparent: true,
+    opacity: 0.25,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  edgeMesh = new THREE.LineSegments(geo, mat);
+  edgeMesh.visible = false;
+  scene.add(edgeMesh);
+}
+
+// ── Left rail: topic list ─────────────────────────────────────────────────
+function buildRail(data) {
+  const list = document.getElementById('topic-list');
+  const clipIdx = Object.fromEntries(data.clip_ids.map((id, i) => [id, i]));
+
+  const byClip = new Map();
+  for (const id of data.clip_ids) byClip.set(id, []);
+  for (const pt of data.points) {
+    if (byClip.has(pt.clip_id)) byClip.get(pt.clip_id).push(pt);
+  }
+
+  let html = '';
+  for (const [clipId, pts] of byClip) {
+    if (pts.length === 0) continue;
+    const ci = clipIdx[clipId] ?? 0;
+    const hexColor = '#' + PALETTE[ci % PALETTE.length].toString(16).padStart(6, '0');
+    const clipTitle = (data.clip_titles[clipId] || clipId).slice(0, 34);
+
+    html += `<div class="clip-section">
+      <div class="clip-section-header" style="--clip-color:${hexColor}">
+        <div class="clip-section-dot" style="background:${hexColor};box-shadow:0 0 5px ${hexColor}"></div>
+        <span class="clip-section-name" title="${data.clip_titles[clipId] || clipId}">${clipTitle}</span>
+      </div>`;
+
+    for (const pt of pts) {
+      const safeTitle = pt.topic_title.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+      const displayTitle = pt.topic_title.length > 36 ? pt.topic_title.slice(0, 36) + '…' : pt.topic_title;
+      html += `<div class="topic-row level-${pt.level}"
+        data-clip="${pt.clip_id}"
+        data-title="${safeTitle}"
+        data-color="${hexColor}"
+        style="--row-color:${hexColor};--row-hover-bg:${hexColor}11"
+        title="${safeTitle}">
+        <span class="level-badge">L${pt.level}</span>
+        <span class="topic-num">${pt.number}</span>
+        <span class="topic-name">${displayTitle}</span>
+      </div>`;
+    }
+
+    html += '</div>';
+  }
+
+  list.innerHTML = html;
+
+  list.querySelectorAll('.topic-row').forEach(row => {
+    row.addEventListener('mouseenter', () => {
+      list.querySelectorAll('.topic-row.active').forEach(r => r.classList.remove('active'));
+      row.classList.add('active');
+
+      const key = `${row.dataset.clip}|${row.dataset.title}`;
+      const pos = worldPositions.get(key);
+      if (pos) {
+        const arr = highlightGeo.attributes.position.array;
+        arr[0] = pos.x; arr[1] = pos.y; arr[2] = pos.z;
+        highlightGeo.attributes.position.needsUpdate = true;
+        highlightMat.color.set(row.dataset.color || '#ffffff');
+        highlightMesh.visible = true;
+        highlightPhase = 0;
+      }
+    });
+
+    row.addEventListener('mouseleave', () => {
+      row.classList.remove('active');
+      highlightMesh.visible = false;
+    });
+  });
+}
+
+// ── Legends ───────────────────────────────────────────────────────────────
 function buildLegend(data) {
   const legend = document.getElementById('legend');
-  const MAX = 12;
+  const MAX = 8;
   const ids = data.clip_ids.slice(0, MAX);
   legend.innerHTML = ids.map((id, i) => {
     const color = '#' + PALETTE[i % PALETTE.length].toString(16).padStart(6, '0');
-    const label = (data.clip_titles[id] || id).slice(0, 26);
+    const label = (data.clip_titles[id] || id).slice(0, 28);
     return `<div class="legend-row">
       <div class="legend-dot" style="background:${color};color:${color}"></div>
       <div class="legend-label" title="${data.clip_titles[id] || id}">${label}</div>
     </div>`;
   }).join('');
   if (data.clip_ids.length > MAX) {
-    legend.innerHTML += `<div class="legend-row" style="color:var(--text-lo);font-size:0.68rem">+${data.clip_ids.length - MAX} more</div>`;
+    legend.innerHTML += `<div class="legend-row" style="color:var(--text-lo);font-size:0.65rem">+${data.clip_ids.length - MAX} more</div>`;
+  }
+}
+
+function buildClusterLegend(data) {
+  const legend = document.getElementById('legend');
+  const k = data.total_clusters;
+  const MAX = 10;
+  const count = Math.min(k, MAX);
+  legend.innerHTML = Array.from({ length: count }, (_, i) => {
+    const color = '#' + CLUSTER_PALETTE[i % CLUSTER_PALETTE.length].toString(16).padStart(6, '0');
+    return `<div class="legend-row">
+      <div class="legend-dot" style="background:${color};color:${color}"></div>
+      <div class="legend-label">Cluster ${i}</div>
+    </div>`;
+  }).join('');
+  if (k > MAX) {
+    legend.innerHTML += `<div class="legend-row" style="color:var(--text-lo);font-size:0.65rem">+${k - MAX} more</div>`;
   }
 }
 
 function updateStats(data) {
   document.getElementById('stats').textContent =
-    `${data.total_topics} topics · ${data.total_clips} clips`;
+    `${data.total_topics} topics · ${data.total_clips} clips · ${data.total_clusters} clusters`;
+}
+
+// ── Semantic search ───────────────────────────────────────────────────────
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+function clearSearchHighlights() {
+  if (searchHighlightMesh) {
+    scene.remove(searchHighlightMesh);
+    searchHighlightMesh.geometry.dispose();
+    searchHighlightMesh.material.dispose();
+    searchHighlightMesh = null;
+  }
+  document.getElementById('search-results').innerHTML = '';
+}
+
+async function runSearch(q, data) {
+  clearSearchHighlights();
+  if (!q || !q.trim()) return;
+
+  let results;
+  try {
+    const resp = await fetch(`/viz/search?q=${encodeURIComponent(q.trim())}&top_k=10`);
+    if (!resp.ok) return;
+    results = await resp.json();
+  } catch { return; }
+
+  if (!results.length) return;
+
+  const container = document.getElementById('search-results');
+  container.innerHTML = results.map(r =>
+    `<div class="search-hit" data-idx="${r.point_index}">
+      <span class="search-hit-title" title="${r.topic_title.replace(/"/g, '&quot;')}">${r.topic_title.slice(0, 32)}</span>
+      <span class="search-hit-score">${(r.similarity * 100).toFixed(0)}%</span>
+    </div>`
+  ).join('');
+
+  container.querySelectorAll('.search-hit').forEach(el => {
+    el.addEventListener('click', () => focusPoint(parseInt(el.dataset.idx, 10)));
+  });
+
+  const positions = new Float32Array(results.length * 3);
+  for (let i = 0; i < results.length; i++) {
+    const pos = pointWorldPositions[results[i].point_index];
+    if (!pos) continue;
+    positions[i * 3]     = pos.x;
+    positions[i * 3 + 1] = pos.y;
+    positions[i * 3 + 2] = pos.z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.55,
+    map: glowTex,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.9,
+    sizeAttenuation: true,
+  });
+  searchHighlightMesh = new THREE.Points(geo, mat);
+  scene.add(searchHighlightMesh);
+}
+
+function focusPoint(idx) {
+  const pos = pointWorldPositions[idx];
+  if (!pos) return;
+  controls.target.set(pos.x, pos.y, pos.z);
+  controls.update();
 }
 
 // ── Animation loop ────────────────────────────────────────────────────────
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+
+  if (highlightMesh.visible) {
+    highlightPhase += 0.07;
+    highlightMat.size = 0.55 + 0.30 * Math.sin(highlightPhase);
+    highlightMat.opacity = 0.75 + 0.20 * Math.sin(highlightPhase * 1.3);
+  }
+
   renderer.render(scene, camera);
 }
 
@@ -455,6 +984,7 @@ async function main() {
     return;
   }
 
+  currentData = data;
   document.getElementById('loading-overlay').classList.remove('visible');
 
   if (data.total_topics === 0) {
@@ -463,9 +993,35 @@ async function main() {
   }
 
   buildScene(data);
+  buildEdgeMesh(data);
   buildLegend(data);
+  buildRail(data);
   updateStats(data);
   animate();
+
+  // Wire up color mode toggle
+  const btnColorMode = document.getElementById('btn-color-mode');
+  btnColorMode.addEventListener('click', function () {
+    colorMode = colorMode === 'clip' ? 'cluster' : 'clip';
+    this.textContent = colorMode === 'clip' ? 'Color: By Clip' : 'Color: By Cluster';
+    this.classList.toggle('active', colorMode === 'cluster');
+    applyColorMode(data);
+  });
+
+  // Wire up edges toggle
+  const btnEdges = document.getElementById('btn-edges');
+  btnEdges.addEventListener('click', function () {
+    edgesVisible = !edgesVisible;
+    if (edgeMesh) edgeMesh.visible = edgesVisible;
+    this.textContent = edgesVisible ? 'Edges: Visible' : 'Edges: Hidden';
+    this.classList.toggle('active', edgesVisible);
+  });
+
+  // Wire up search with debounce
+  const searchInput = document.getElementById('search-input');
+  searchInput.addEventListener('input', debounce(e => {
+    runSearch(e.target.value, data);
+  }, 350));
 }
 
 main();

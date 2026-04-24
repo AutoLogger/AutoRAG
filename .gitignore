@@ -24,3 +24,5 @@ data/
 .DS_Store
 .vscode/
 .idea/
+
+*.webm

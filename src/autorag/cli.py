@@ -117,9 +117,27 @@ def _transcribe(
     )
     cli_finalize_s = _time.perf_counter() - _t
 
+    _t = _time.perf_counter()
+    clip_data = db.get_clip(session_id)
+    if clip_data and clip_data.get("topics"):
+        _topics = json.loads(clip_data["topics"])
+        from autorag.topic_embed import embed_topic_titles
+        _texts = [
+            f"{t['title']}. {t['summary']}" if t.get("summary") else t["title"]
+            for t in _topics if t.get("title")
+        ]
+        if _texts:
+            try:
+                _embeddings = embed_topic_titles(_texts)
+                db.store_embeddings(session_id, _embeddings)
+            except Exception as _exc:
+                typer.echo(f"Warning: embedding computation failed: {_exc}", err=True)
+    cli_embed_s = _time.perf_counter() - _t
+
     timings = result.get("timings", {})
     timings["cli_store_words"] = cli_store_words_s
     timings["cli_finalize"] = cli_finalize_s
+    timings["cli_embed"] = cli_embed_s
 
     stage_order = [
         "db_enumerate",
@@ -134,6 +152,7 @@ def _transcribe(
         "db_fanout",
         "cli_store_words",
         "cli_finalize",
+        "cli_embed",
     ]
 
     clip = db.get_clip(session_id)

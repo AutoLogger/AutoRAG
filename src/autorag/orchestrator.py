@@ -373,6 +373,7 @@ def run_session_transcription(
         except (TypeError, ValueError):
             word_end_s = None
 
+        summary = str(node.get("summary", "") or "").strip()
         metadata = {
             "transcription": {
                 "level": level,
@@ -381,6 +382,7 @@ def run_session_transcription(
                 "number_label": number_label,
                 "word_start_s": word_start_s,
                 "word_end_s": word_end_s,
+                "summary": summary,
             }
         }
 

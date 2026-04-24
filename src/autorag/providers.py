@@ -51,6 +51,7 @@ class WordSpan(TypedDict, total=False):
 
 class Topic(TypedDict, total=False):
     title: str
+    summary: str
     start_s: float
     children: list["Topic"]
 
@@ -106,20 +107,21 @@ SYSTEM_PROMPT = (
     "3-level topic outline summarizing what was discussed.\n\n"
     "Rules:\n"
     "1. Produce at most 3 levels: top-level topics (L1), subtopics (L2), and "
-    "sub-subtopics / beats (L3). A child's time range must be strictly "
-    "contained within its parent's time range.\n"
+    "sub-subtopics / beats (L3).\n"
     "2. Only nest a subtopic level if you have at least 2 siblings at that "
     "level. If a topic would have only one subtopic, fold it into the "
     "parent instead of creating a lone child.\n"
     "3. Each topic has a short sentence `title` (<=120 chars) describing "
-    "what it covers, and a `start_s` number: the earliest word start time "
-    "(in seconds, relative to audio start) that the topic covers.\n"
+    "what it covers, a `summary` (2-4 sentences describing in detail what "
+    "was discussed in this section), and a `start_s` number: the earliest "
+    "word start time (in seconds, relative to audio start) that the topic "
+    "covers.\n"
     "4. `start_s` values must be monotonically non-decreasing within a "
     "sibling list.\n"
     "5. Output ONLY JSON matching this schema:\n"
-    '{"topics":[{"title":str,"start_s":float,'
-    '"children":[{"title":str,"start_s":float,'
-    '"children":[{"title":str,"start_s":float,"children":[]}]}]}]}\n'
+    '{"topics":[{"title":str,"summary":str,"start_s":float,'
+    '"children":[{"title":str,"summary":str,"start_s":float,'
+    '"children":[{"title":str,"summary":str,"start_s":float,"children":[]}]}]}]}\n'
     "6. Do not invent topics that are not present in the transcript. Do not "
     "include timestamps outside the transcript's range.\n"
 )
@@ -128,7 +130,7 @@ SYSTEM_PROMPT = (
 # Grouping words into ~10s chunks keeps prompts short and — more importantly —
 # keeps the timestamp anchors spread across the whole audio so the LLM doesn't
 # cluster every topic near the start of what it can attend to.
-_PROMPT_CHUNK_SECONDS = 30.0
+_PROMPT_CHUNK_SECONDS = 1.0
 
 
 def _chunk_transcript(
@@ -198,6 +200,7 @@ TOPIC_LEAF_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "summary": {"type": "string"},
         "start_s": {"type": "number"},
         "children": {
             "type": "array",
@@ -205,7 +208,7 @@ TOPIC_LEAF_SCHEMA: dict[str, Any] = {
             "maxItems": 0,
         },
     },
-    "required": ["title", "start_s", "children"],
+    "required": ["title", "summary", "start_s", "children"],
     "additionalProperties": False,
 }
 
@@ -213,10 +216,11 @@ TOPIC_L2_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "summary": {"type": "string"},
         "start_s": {"type": "number"},
         "children": {"type": "array", "items": TOPIC_LEAF_SCHEMA},
     },
-    "required": ["title", "start_s", "children"],
+    "required": ["title", "summary", "start_s", "children"],
     "additionalProperties": False,
 }
 
@@ -224,10 +228,11 @@ TOPIC_L1_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "summary": {"type": "string"},
         "start_s": {"type": "number"},
         "children": {"type": "array", "items": TOPIC_L2_SCHEMA},
     },
-    "required": ["title", "start_s", "children"],
+    "required": ["title", "summary", "start_s", "children"],
     "additionalProperties": False,
 }
 
@@ -273,9 +278,10 @@ def _coerce_tree(obj: Any, max_depth: int = 3) -> TopicTree:
                 start_s = 0.0
             if not title:
                 continue
+            summary = str(n.get("summary", "") or "").strip()
             children_raw = n.get("children") or []
             children = _walk(children_raw, depth + 1) if depth < max_depth else []
-            out.append({"title": title, "start_s": start_s, "children": children})
+            out.append({"title": title, "summary": summary, "start_s": start_s, "children": children})
         return out
 
     topics = _walk(raw_topics, 1)
@@ -498,10 +504,7 @@ class OllamaProvider:
             "model": self.model,
             "stream": False,
             "format": "json",
-            "options": {
-                "num_ctx": 64000,
-                "num_predict": -1,
-            },
+            "options": {"num_ctx": 64000, "num_predict": -1, "temperature": 0.0},
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
