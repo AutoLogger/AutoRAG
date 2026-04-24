@@ -14,7 +14,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import whisper
 
@@ -26,7 +26,7 @@ _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
 _CPU_PINNED = False  # set True after any CUDA failure for the process lifetime
 _DEVICE_LOG_EMITTED = False
-_RESOLVED_DEVICE: Optional[str] = None
+_RESOLVED_DEVICE: str | None = None
 
 
 def _torch_cuda_available() -> bool:
@@ -88,7 +88,7 @@ def _load_model_on(size: str, device: str) -> Any:
     return whisper.load_model(size, device=device)
 
 
-def get_model(size: str, device_hint: Optional[str] = None) -> Any:
+def get_model(size: str, device_hint: str | None = None) -> Any:
     """Return a cached Whisper model for the given size.
 
     `device_hint` is advisory: if the process is already CPU-pinned because of
@@ -133,7 +133,7 @@ def _is_cuda_error(exc: BaseException) -> bool:
         return True
     if "out of memory" in msg:
         return True
-    if "nvml" in msg or "driver" in msg and "cuda" in msg:
+    if "nvml" in msg or ("driver" in msg and "cuda" in msg):
         return True
     return False
 
@@ -141,7 +141,7 @@ def _is_cuda_error(exc: BaseException) -> bool:
 def transcribe_segment(
     model: Any,
     file_path: str,
-    language: Optional[str],
+    language: str | None,
 ) -> list[dict[str, Any]]:
     """Transcribe a single audio file and return a flat list of word dicts.
 
@@ -190,7 +190,7 @@ def transcribe_segment(
     return words_out
 
 
-def _current_model_size(model: Any) -> Optional[str]:
+def _current_model_size(model: Any) -> str | None:
     """Best-effort reverse lookup of a model's cache key for size."""
     with _MODEL_LOCK:
         for (size, _device), m in _MODEL_CACHE.items():
@@ -201,6 +201,6 @@ def _current_model_size(model: Any) -> Optional[str]:
 
 __all__ = [
     "get_model",
-    "transcribe_segment",
     "resolved_device",
+    "transcribe_segment",
 ]

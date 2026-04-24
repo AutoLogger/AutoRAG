@@ -26,3 +26,5 @@ data/
 .idea/
 
 *.webm
+
+.claude/settings.local.json

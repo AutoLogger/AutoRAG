@@ -31,7 +31,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class Topic(TypedDict, total=False):
     title: str
     summary: str
     start_s: float
-    children: list["Topic"]
+    children: list[Topic]
 
 
 class TopicTree(TypedDict):
@@ -142,7 +142,7 @@ def _chunk_transcript(
     ``chunk_seconds``. Empty tokens are skipped.
     """
     chunks: list[tuple[float, float, str]] = []
-    cur_start: Optional[float] = None
+    cur_start: float | None = None
     cur_end: float = 0.0
     cur_words: list[str] = []
     for ws in transcript:
@@ -164,9 +164,7 @@ def _chunk_transcript(
     return chunks
 
 
-def _build_user_prompt(
-    transcript: list[WordSpan], levels: int, prompt_extras: str
-) -> str:
+def _build_user_prompt(transcript: list[WordSpan], levels: int, prompt_extras: str) -> str:
     levels = max(1, min(3, int(levels or 3)))
     lines = [
         f"Produce up to {levels} levels of topic nesting.",
@@ -257,9 +255,7 @@ def _coerce_tree(obj: Any, max_depth: int = 3) -> TopicTree:
     Raises `ValueError` if the shape is unusable.
     """
     if not isinstance(obj, dict) or "topics" not in obj:
-        raise ValueError(
-            f"response missing top-level `topics` array; got: {str(obj)[:200]!r}"
-        )
+        raise ValueError(f"response missing top-level `topics` array; got: {str(obj)[:200]!r}")
     raw_topics = obj.get("topics")
     if not isinstance(raw_topics, list):
         raise ValueError(f"`topics` must be an array; got: {str(raw_topics)[:200]!r}")
@@ -281,7 +277,9 @@ def _coerce_tree(obj: Any, max_depth: int = 3) -> TopicTree:
             summary = str(n.get("summary", "") or "").strip()
             children_raw = n.get("children") or []
             children = _walk(children_raw, depth + 1) if depth < max_depth else []
-            out.append({"title": title, "summary": summary, "start_s": start_s, "children": children})
+            out.append(
+                {"title": title, "summary": summary, "start_s": start_s, "children": children}
+            )
         return out
 
     topics = _walk(raw_topics, 1)
@@ -328,14 +326,10 @@ class LLMProvider(Protocol):
 class AnthropicProvider:
     model: str = PROVIDER_DEFAULT_MODELS["anthropic"]
 
-    def summarize(
-        self, transcript: list[WordSpan], levels: int, prompt_extras: str
-    ) -> TopicTree:
+    def summarize(self, transcript: list[WordSpan], levels: int, prompt_extras: str) -> TopicTree:
         api_key = os.environ.get("AUTOLOGGER_ANTHROPIC_API_KEY", "").strip()
         if not api_key:
-            raise RuntimeError(
-                "AUTOLOGGER_ANTHROPIC_API_KEY is not set; cannot call Anthropic."
-            )
+            raise RuntimeError("AUTOLOGGER_ANTHROPIC_API_KEY is not set; cannot call Anthropic.")
         try:
             import anthropic  # type: ignore
         except ImportError as exc:
@@ -386,14 +380,10 @@ class AnthropicProvider:
 class OpenAIProvider:
     model: str = PROVIDER_DEFAULT_MODELS["openai"]
 
-    def summarize(
-        self, transcript: list[WordSpan], levels: int, prompt_extras: str
-    ) -> TopicTree:
+    def summarize(self, transcript: list[WordSpan], levels: int, prompt_extras: str) -> TopicTree:
         api_key = os.environ.get("AUTOLOGGER_OPENAI_API_KEY", "").strip()
         if not api_key:
-            raise RuntimeError(
-                "AUTOLOGGER_OPENAI_API_KEY is not set; cannot call OpenAI."
-            )
+            raise RuntimeError("AUTOLOGGER_OPENAI_API_KEY is not set; cannot call OpenAI.")
         try:
             from openai import OpenAI  # type: ignore
         except ImportError as exc:
@@ -443,14 +433,10 @@ class OpenAIProvider:
 class GeminiProvider:
     model: str = PROVIDER_DEFAULT_MODELS["gemini"]
 
-    def summarize(
-        self, transcript: list[WordSpan], levels: int, prompt_extras: str
-    ) -> TopicTree:
+    def summarize(self, transcript: list[WordSpan], levels: int, prompt_extras: str) -> TopicTree:
         api_key = os.environ.get("AUTOLOGGER_GEMINI_API_KEY", "").strip()
         if not api_key:
-            raise RuntimeError(
-                "AUTOLOGGER_GEMINI_API_KEY is not set; cannot call Gemini."
-            )
+            raise RuntimeError("AUTOLOGGER_GEMINI_API_KEY is not set; cannot call Gemini.")
         try:
             from google import genai  # type: ignore
             from google.genai import types as genai_types  # type: ignore
@@ -473,9 +459,7 @@ class GeminiProvider:
                 response_mime_type="application/json",
             )
 
-        resp = client.models.generate_content(
-            model=self.model, contents=user_prompt, config=config
-        )
+        resp = client.models.generate_content(model=self.model, contents=user_prompt, config=config)
         text = getattr(resp, "text", None) or ""
         if not text:
             raise RuntimeError("Gemini returned empty response.")
@@ -490,9 +474,7 @@ class GeminiProvider:
 class OllamaProvider:
     model: str = PROVIDER_DEFAULT_MODELS["ollama"]
 
-    def summarize(
-        self, transcript: list[WordSpan], levels: int, prompt_extras: str
-    ) -> TopicTree:
+    def summarize(self, transcript: list[WordSpan], levels: int, prompt_extras: str) -> TopicTree:
         try:
             import httpx  # type: ignore
         except ImportError as exc:
@@ -555,18 +537,18 @@ def get_provider(name: str, *, model: str) -> LLMProvider:
 
 
 __all__ = [
+    "OLLAMA_BASE_URL",
+    "PROVIDER_DEFAULT_MODELS",
+    "TOPIC_TREE_SCHEMA",
+    "AnthropicProvider",
+    "GeminiProvider",
     "LLMProvider",
-    "WordSpan",
+    "OllamaProvider",
+    "OpenAIProvider",
+    "ProviderName",
     "Topic",
     "TopicTree",
-    "ProviderName",
-    "AnthropicProvider",
-    "OpenAIProvider",
-    "GeminiProvider",
-    "OllamaProvider",
-    "PROVIDER_DEFAULT_MODELS",
-    "OLLAMA_BASE_URL",
-    "provider_configured",
+    "WordSpan",
     "get_provider",
-    "TOPIC_TREE_SCHEMA",
+    "provider_configured",
 ]

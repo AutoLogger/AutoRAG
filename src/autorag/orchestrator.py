@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from autorag import whisper_runner
 from autorag.db import Database
@@ -36,7 +36,7 @@ MAX_TRANSCRIPT_SECONDS = 90 * 60
 # --------------------------------------------------------------------------- #
 
 
-def _parse_utc(value: Any) -> Optional[datetime]:
+def _parse_utc(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -52,8 +52,8 @@ def _parse_utc(value: Any) -> Optional[datetime]:
         except ValueError:
             return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _seconds_to_timedelta(seconds: float) -> timedelta:
@@ -68,9 +68,7 @@ def _seconds_to_timedelta(seconds: float) -> timedelta:
 # --------------------------------------------------------------------------- #
 
 
-def _resolve_segment_file(
-    db: Any, session_id: str, segment_id: str
-) -> Optional[tuple[Path, str]]:
+def _resolve_segment_file(db: Any, session_id: str, segment_id: str) -> tuple[Path, str] | None:
     resolver = getattr(db, "get_audio_segment_file", None)
     if resolver is None:
         return None
@@ -107,7 +105,7 @@ def _enrich_segments(db: Any, session_id: str, segments: list[dict]) -> list[dic
 
 
 def _run_whisper_on_segments(
-    segments: list[dict], whisper_model: str, language: Optional[str]
+    segments: list[dict], whisper_model: str, language: str | None
 ) -> tuple[dict, float, float]:
     """Run Whisper over every segment and return (cache payload, model_load_s, transcription_s)."""
     t0 = time.perf_counter()
@@ -216,9 +214,7 @@ def _iter_topics_flat(tree: TopicTree):
                 continue
             sibling_count += 1
             number_label = (
-                str(sibling_count)
-                if not parent_number
-                else f"{parent_number}.{sibling_count}"
+                str(sibling_count) if not parent_number else f"{parent_number}.{sibling_count}"
             )
             yield level, node, number_label
             children = node.get("children") or []
@@ -238,7 +234,7 @@ def run_session_transcription(
     session_id: str,
     *,
     whisper_model: str,
-    language: Optional[str],
+    language: str | None,
     provider_name: Literal["anthropic", "openai", "gemini", "ollama"],
     llm_model: str,
     replace_existing: bool,
@@ -291,7 +287,7 @@ def run_session_transcription(
         )
         timings["whisper_model_load"] = model_load_s
         timings["whisper_transcription"] = transcription_s
-        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         _t = time.perf_counter()
         try:
             db.upsert_transcript(
@@ -307,7 +303,7 @@ def run_session_transcription(
         timings["db_upsert_transcript"] = time.perf_counter() - _t
 
     # 4. Compute audio_start_wall_time as the earliest segment start.
-    earliest: Optional[datetime] = None
+    earliest: datetime | None = None
     for seg in enriched:
         dt = _parse_utc(seg.get("started_at_utc"))
         if dt is None:
@@ -316,7 +312,7 @@ def run_session_transcription(
             earliest = dt
     if earliest is None:
         # Fall back to "now" so at least the events get created coherently.
-        earliest = datetime.now(timezone.utc)
+        earliest = datetime.now(UTC)
 
     # 5. Flatten and call the LLM provider.
     _t = time.perf_counter()
@@ -336,8 +332,7 @@ def run_session_transcription(
 
     if not isinstance(tree, dict) or "topics" not in tree:
         raise RuntimeError(
-            f"Provider {provider_name} returned malformed summary: "
-            f"missing top-level 'topics' field"
+            f"Provider {provider_name} returned malformed summary: missing top-level 'topics' field"
         )
 
     _t = time.perf_counter()
@@ -365,7 +360,7 @@ def run_session_transcription(
             start_s = 0.0
         # Optional end_s if the provider supplied one
         word_start_s = start_s
-        word_end_s: Optional[float] = None
+        word_end_s: float | None = None
         raw_end = node.get("end_s")
         try:
             if raw_end is not None:

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import typer
 
@@ -43,13 +43,13 @@ def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> No
 
 def _transcribe(
     file: Path,
-    title: Optional[str] = None,
+    title: str | None = None,
     whisper_model: str = "base",
     provider: Literal["anthropic", "openai", "gemini", "ollama"] = "ollama",
     llm_model: str = "granite3.3:8b",
     language: str = "",
     force_retranscribe: bool = False,
-    db_override: Optional[Path] = None,
+    db_override: Path | None = None,
 ) -> tuple[list[str], dict[Any, Any], dict[Any, Any] | None, Any]:
     """Transcribe an audio file and output topics as a JSON list."""
     from autorag.db import Database
@@ -66,11 +66,7 @@ def _transcribe(
     session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(file.resolve())))
     clip_title = title or file.stem
     mtime = file.stat().st_mtime
-    created_at = (
-        datetime.fromtimestamp(mtime, tz=timezone.utc)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    created_at = datetime.fromtimestamp(mtime, tz=UTC).isoformat().replace("+00:00", "Z")
 
     db.create_clip(
         session_id,
@@ -102,9 +98,7 @@ def _transcribe(
     transcript_end_s = 0.0
     if words:
         last = words[-1]
-        transcript_end_s = last.get("abs_s", 0.0) + (
-            last.get("e", 0.0) - last.get("s", 0.0)
-        )
+        transcript_end_s = last.get("abs_s", 0.0) + (last.get("e", 0.0) - last.get("s", 0.0))
 
     _t = _time.perf_counter()
     db.finalize_topics(
@@ -122,9 +116,11 @@ def _transcribe(
     if clip_data and clip_data.get("topics"):
         _topics = json.loads(clip_data["topics"])
         from autorag.topic_embed import embed_topic_titles
+
         _texts = [
             f"{t['title']}. {t['summary']}" if t.get("summary") else t["title"]
-            for t in _topics if t.get("title")
+            for t in _topics
+            if t.get("title")
         ]
         if _texts:
             try:
@@ -161,10 +157,8 @@ def _transcribe(
 
 @app.command()
 def transcribe(
-    file: Path = typer.Argument(
-        ..., help="Audio file to transcribe (.webm, .mp4, etc.)"
-    ),
-    title: Optional[str] = typer.Option(
+    file: Path = typer.Argument(..., help="Audio file to transcribe (.webm, .mp4, etc.)"),
+    title: str | None = typer.Option(
         None, "--title", "-t", help="Clip title (defaults to filename stem)"
     ),
     whisper_model: str = typer.Option(
@@ -191,9 +185,7 @@ def transcribe(
     force_retranscribe: bool = typer.Option(
         False, "--force-retranscribe", help="Re-run Whisper even if cached"
     ),
-    db_override: Optional[Path] = typer.Option(
-        None, "--db", help="Override database path"
-    ),
+    db_override: Path | None = typer.Option(None, "--db", help="Override database path"),
 ) -> None:
     """Transcribe an audio file and output topics as a JSON list."""
     stage_order, result, clip, timings = _transcribe(
@@ -213,16 +205,10 @@ def transcribe(
     for stage in stage_order:
         secs = timings.get(stage, 0.0)
         label = stage.ljust(max_label)
-        note = (
-            cached_note
-            if stage in ("whisper_model_load", "whisper_transcription")
-            else ""
-        )
+        note = cached_note if stage in ("whisper_model_load", "whisper_transcription") else ""
         typer.echo(f"  {label}  {secs:8.3f}s{note}", err=True)
     typer.echo(f"  {'─' * (max_label + 11)}", err=True)
-    typer.echo(
-        f"  {'TOTAL'.ljust(max_label)}  {result['duration_secs']:8.3f}s", err=True
-    )
+    typer.echo(f"  {'TOTAL'.ljust(max_label)}  {result['duration_secs']:8.3f}s", err=True)
     typer.echo(f"  device: {result.get('device_used', 'unknown')}", err=True)
     typer.echo("", err=True)
 

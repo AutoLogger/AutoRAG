@@ -6,7 +6,7 @@ import json
 import mimetypes
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 from pydantic_sqlite import DataBase
@@ -19,14 +19,14 @@ class AudioClip(BaseModel):
     title: str
     file_path: str
     created_at: str
-    audio_signature: Optional[str] = None
-    transcription: Optional[str] = None
-    whisper_cache: Optional[str] = None
-    topics: Optional[str] = None
-    whisper_model: Optional[str] = None
-    provider: Optional[str] = None
-    llm_model: Optional[str] = None
-    embeddings: Optional[str] = None
+    audio_signature: str | None = None
+    transcription: str | None = None
+    whisper_cache: str | None = None
+    topics: str | None = None
+    whisper_model: str | None = None
+    provider: str | None = None
+    llm_model: str | None = None
+    embeddings: str | None = None
 
 
 class Database:
@@ -34,7 +34,7 @@ class Database:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db = DataBase(db_path)
 
-    def _row(self, session_id: str) -> Optional[AudioClip]:
+    def _row(self, session_id: str) -> AudioClip | None:
         try:
             return self.db.model_from_table(_TABLE, session_id)
         except KeyError:
@@ -48,9 +48,7 @@ class Database:
             return []
         return [{"id": "0", "started_at_utc": row.created_at}]
 
-    def get_audio_segment_file(
-        self, session_id: str, segment_id: str
-    ) -> Optional[tuple[Path, str]]:
+    def get_audio_segment_file(self, session_id: str, segment_id: str) -> tuple[Path, str] | None:
         row = self._row(session_id)
         if not row:
             return None
@@ -58,7 +56,7 @@ class Database:
         mime = mimetypes.guess_type(str(path))[0] or "audio/webm"
         return (path, mime)
 
-    def get_transcript(self, session_id: str) -> Optional[dict]:
+    def get_transcript(self, session_id: str) -> dict | None:
         row = self._row(session_id)
         if not row or not row.whisper_cache or not row.audio_signature:
             return None
@@ -72,7 +70,7 @@ class Database:
         session_id: str,
         *,
         whisper_model: str,
-        language: Optional[str],
+        language: str | None,
         audio_signature: str,
         transcript_json: dict,
         generated_at_utc: str,
@@ -155,13 +153,9 @@ class Database:
             level_evs.sort(key=lambda e: e["start_s"])
             for i, ev in enumerate(level_evs):
                 if i + 1 < len(level_evs):
-                    ev["duration_s"] = round(
-                        level_evs[i + 1]["start_s"] - ev["start_s"], 3
-                    )
+                    ev["duration_s"] = round(level_evs[i + 1]["start_s"] - ev["start_s"], 3)
                 else:
-                    ev["duration_s"] = round(
-                        max(0.0, transcript_end_s - ev["start_s"]), 3
-                    )
+                    ev["duration_s"] = round(max(0.0, transcript_end_s - ev["start_s"]), 3)
 
         topics = [
             {
@@ -192,7 +186,7 @@ class Database:
         clip.embeddings = json.dumps(embeddings)
         self.db.add(_TABLE, clip, pk="id")
 
-    def get_clip(self, session_id: str) -> Optional[dict]:
+    def get_clip(self, session_id: str) -> dict | None:
         clip = self._row(session_id)
         if not clip:
             return None
