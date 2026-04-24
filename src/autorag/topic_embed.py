@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from typing import cast
 
 
 def embed_topic_titles(titles: list[str]) -> list[list[float]]:
@@ -22,4 +23,4 @@ def embed_topic_titles(titles: list[str]) -> list[list[float]]:
             body = json.loads(resp.read())
     except Exception as exc:
         raise RuntimeError(f"Ollama embedding request failed ({base_url}): {exc}") from exc
-    return body["embeddings"]
+    return cast("list[list[float]]", body["embeddings"])

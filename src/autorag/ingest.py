@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from autorag.schemas import Chunk, Document
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from autorag.schemas import Chunk, Document
 
 
 def load_documents(paths: list[str | Path]) -> list[Document]:
     raise NotImplementedError
 
 
-def load_audio_clips(paths: list[str | Path]) -> list[dict]:
+def load_audio_clips(paths: list[str | Path]) -> list[dict[str, Any]]:
     raise NotImplementedError
 
 

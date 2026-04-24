@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.cluster import AgglomerativeClustering  # type: ignore[import-untyped]
+from sklearn.metrics.pairwise import cosine_similarity  # type: ignore[import-untyped]
 
 
 def cluster_embeddings(
@@ -13,7 +15,7 @@ def cluster_embeddings(
 ) -> np.ndarray:
     """Assign cluster labels to topic embeddings using agglomerative clustering.
 
-    distance_threshold is cosine distance (0–2); 0.35 ≈ similarity ≥ 0.65.
+    distance_threshold is cosine distance (0-2); 0.35 ~ similarity >= 0.65.
     Returns an int array of shape (N,) with labels 0..K-1.
     """
     n = len(embeddings)
@@ -29,7 +31,7 @@ def cluster_embeddings(
         metric="cosine",
         linkage="average",
     )
-    return clust.fit_predict(safe).astype(int)
+    return cast("np.ndarray", clust.fit_predict(safe).astype(int))
 
 
 def build_edges(

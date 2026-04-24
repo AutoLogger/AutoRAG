@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from autorag.config import Settings, get_settings
+
+if TYPE_CHECKING:
+    from pathlib import Path
 from autorag.embed import Embedder
 from autorag.generate import Generator
 from autorag.ingest import chunk_document, load_documents

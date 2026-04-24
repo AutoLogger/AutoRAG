@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from autorag.embed import Embedder
-from autorag.schemas import Retrieved
-from autorag.store import VectorStore
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from autorag.embed import Embedder
+    from autorag.schemas import Retrieved
+    from autorag.store import VectorStore
 
 
 class Retriever:

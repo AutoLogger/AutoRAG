@@ -6,7 +6,7 @@ import json
 import mimetypes
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 from pydantic_sqlite import DataBase
@@ -36,13 +36,13 @@ class Database:
 
     def _row(self, session_id: str) -> AudioClip | None:
         try:
-            return self.db.model_from_table(_TABLE, session_id)
+            return cast("AudioClip", self.db.model_from_table(_TABLE, session_id))
         except KeyError:
             return None
 
     # --- orchestrator duck-typed interface ---
 
-    def list_audio_segments(self, session_id: str) -> list[dict]:
+    def list_audio_segments(self, session_id: str) -> list[dict[str, Any]]:
         row = self._row(session_id)
         if not row:
             return []
@@ -56,7 +56,7 @@ class Database:
         mime = mimetypes.guess_type(str(path))[0] or "audio/webm"
         return (path, mime)
 
-    def get_transcript(self, session_id: str) -> dict | None:
+    def get_transcript(self, session_id: str) -> dict[str, Any] | None:
         row = self._row(session_id)
         if not row or not row.whisper_cache or not row.audio_signature:
             return None
@@ -72,7 +72,7 @@ class Database:
         whisper_model: str,
         language: str | None,
         audio_signature: str,
-        transcript_json: dict,
+        transcript_json: dict[str, Any],
         generated_at_utc: str,
     ) -> None:
         clip = self._row(session_id)
@@ -89,9 +89,9 @@ class Database:
         *,
         category: str,
         message: str,
-        metadata: dict,
+        metadata: dict[str, Any],
         marked_at_utc: Any,
-    ) -> dict:
+    ) -> dict[str, Any]:
         event_id = str(uuid.uuid4())
         tx = metadata.get("transcription", {})
         return {
@@ -125,7 +125,7 @@ class Database:
         )
         self.db.add(_TABLE, clip, pk="id")
 
-    def store_transcription(self, session_id: str, words: list[dict]) -> None:
+    def store_transcription(self, session_id: str, words: list[dict[str, Any]]) -> None:
         clip = self._row(session_id)
         if clip is None:
             return
@@ -137,7 +137,7 @@ class Database:
         session_id: str,
         transcript_end_s: float,
         *,
-        events: list[dict],
+        events: list[dict[str, Any]],
         provider: str,
         llm_model: str,
         whisper_model: str,
@@ -145,7 +145,7 @@ class Database:
         if not events:
             return
 
-        by_level: dict[int, list[dict]] = {}
+        by_level: dict[int, list[dict[str, Any]]] = {}
         for ev in events:
             by_level.setdefault(ev["level"], []).append(ev)
 
@@ -186,13 +186,13 @@ class Database:
         clip.embeddings = json.dumps(embeddings)
         self.db.add(_TABLE, clip, pk="id")
 
-    def get_clip(self, session_id: str) -> dict | None:
+    def get_clip(self, session_id: str) -> dict[str, Any] | None:
         clip = self._row(session_id)
         if not clip:
             return None
         return clip.model_dump()
 
-    def list_clips(self) -> list[dict]:
+    def list_clips(self) -> list[dict[str, Any]]:
         try:
             if "audio_clips" not in self.db._db.table_names():
                 return []

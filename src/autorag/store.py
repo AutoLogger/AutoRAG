@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from autorag.schemas import Chunk, Retrieved
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from autorag.schemas import Chunk, Retrieved
 
 
 class VectorStore:

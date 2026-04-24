@@ -1,22 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class Document(BaseModel):
     id: str
     source: str
     text: str
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Chunk(BaseModel):
     id: str
     doc_id: str
     text: str
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     embedding: list[float] | None = None
 
 
