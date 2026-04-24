@@ -41,3 +41,12 @@ uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 uv run pytest
 ```
+
+## CI Pipeline
+
+`.github/workflows/ci.yml` runs on every push and PR to `main`. Two parallel jobs:
+
+- **Lint & Type Check** — `ruff check`, `ruff format --check`, `mypy`
+- **Tests** — `pytest -v`
+
+The workflow uses `uv sync --frozen` (fails if `uv.lock` is out of sync with `pyproject.toml`). If you add or change dependencies, run `uv lock` locally before pushing to keep the lock file current.

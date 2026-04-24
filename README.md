@@ -1,13 +1,15 @@
 # AutoRAG
 
+[![CI](https://github.com/AutoLogger/AutoRAG/actions/workflows/ci.yml/badge.svg)](https://github.com/AutoLogger/AutoRAG/actions/workflows/ci.yml)
+
 Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic outline with an LLM, and store everything in a local SQLite database. Includes a semantic visualization layer (UMAP 3-D scatter, agglomerative clustering, cosine-similarity search) and a RAG scaffold (ingest → embed → retrieve → generate) exposed via CLI and HTTP API.
 
 ## Quickstart
 
 ```bash
 # Install (Whisper + Torch are core deps; add a cloud provider if needed)
-uv pip install -e "."
-uv pip install -e ".[anthropic]"   # optional: Anthropic cloud provider
+uv sync                        # installs core deps from the lock file
+uv sync --extra anthropic      # also installs Anthropic SDK
 
 # Transcribe using Ollama (default — no API key needed)
 autorag transcribe session.webm
@@ -134,10 +136,10 @@ All providers receive the same system prompt asking for a 3-level JSON topic out
 ## Optional dependencies
 
 ```bash
-uv pip install -e ".[anthropic]"    # Anthropic SDK
-uv pip install -e ".[openai]"       # OpenAI SDK
-uv pip install -e ".[gemini]"       # Google GenAI SDK
-uv pip install -e ".[all]"          # All cloud providers
+uv sync --extra anthropic    # Anthropic SDK
+uv sync --extra openai       # OpenAI SDK
+uv sync --extra gemini       # Google GenAI SDK
+uv sync --all-extras         # All cloud providers
 ```
 
 Whisper and PyTorch are **core** dependencies and are always installed.

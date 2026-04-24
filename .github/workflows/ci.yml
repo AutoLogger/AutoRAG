@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch/PR to avoid parallel runners
+# each downloading the ~5.5 GB ML dependency set (torch, umap, whisper, etc.)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-analysis:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.x"
+          # Caches ~/.cache/uv keyed on uv.lock. Cache miss (~8-12 min first run)
+          # populates the archive; subsequent runs restore in ~30 s.
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint — ruff check
+        run: uv run ruff check src/ tests/
+
+      - name: Lint — ruff format check
+        run: uv run ruff format --check src/ tests/
+
+      - name: Type check — mypy
+        run: uv run mypy src/autorag/
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.x"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        env:
+          # Default db_path (~/.autorag/autorag.db) may not exist on a fresh runner
+          AUTORAG_DB_PATH: /tmp/autorag-ci.db
+        run: uv run pytest -v
