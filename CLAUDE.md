@@ -30,6 +30,8 @@ Always use `uv`, never `pip` directly:
 These packages have no stubs — covered by mypy `ignore_missing_imports` overrides:
 - `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`, `chromadb`
 
+`langchain-ollama` and `langchain-core` ship inline types and need no mypy overrides.
+
 These packages have no stubs — suppress with `# type: ignore[import-untyped]` at the import site:
 - `sklearn` (used in `viz.py` and `topic_cluster.py`)
 

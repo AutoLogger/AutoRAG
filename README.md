@@ -101,7 +101,7 @@ Ollama is the only supported provider. It runs locally — no API key required.
 |----------|------------------------------|---------------|---------------|
 | ollama   | *(none — local)*             | llama3.1:8b   | *(built-in)*  |
 
-Ollama receives a system prompt asking for a 3-level JSON topic outline and uses `format: json` for structured output.
+Ollama is invoked via [LangChain (`langchain-ollama`)](https://pypi.org/project/langchain-ollama/). The provider constructs messages with `SystemMessage`/`HumanMessage` and calls `ChatOllama.with_structured_output(schema, method="json_schema")` to enforce the topic-tree JSON schema. Embeddings are generated with `OllamaEmbeddings.embed_documents()`.
 
 ## Environment variables
 

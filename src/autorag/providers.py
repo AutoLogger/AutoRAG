@@ -33,6 +33,9 @@ import os
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypedDict
 
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,8 +108,7 @@ SYSTEM_PROMPT = (
     "include timestamps outside the transcript's range.\n"
 )
 
-
-# Grouping words into ~10s chunks keeps prompts short and — more importantly —
+# Grouping words into ~1s chunks keeps prompts short and — more importantly —
 # keeps the timestamp anchors spread across the whole audio so the LLM doesn't
 # cluster every topic near the start of what it can attend to.
 _PROMPT_CHUNK_SECONDS = 1.0
@@ -265,28 +267,6 @@ def _coerce_tree(obj: Any, max_depth: int = 3) -> TopicTree:
     return {"topics": topics}
 
 
-def _extract_json_text(text: str) -> str:
-    """Strip common wrappers (markdown code fences, stray prose) from LLM output."""
-    s = (text or "").strip()
-    if not s:
-        return s
-    if s.startswith("```"):
-        # ```json\n{...}\n``` or ```\n{...}\n```
-        s = s.lstrip("`")
-        if s.lower().startswith("json"):
-            s = s[4:]
-        if s.endswith("```"):
-            s = s[:-3]
-        s = s.strip()
-    # Find outermost braces if there's surrounding prose
-    if s and not s.lstrip().startswith("{"):
-        start = s.find("{")
-        end = s.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            s = s[start : end + 1]
-    return s
-
-
 # ----------------------------------------------------------------------------- #
 # Provider Protocol + Implementations                                            #
 # ----------------------------------------------------------------------------- #
@@ -306,46 +286,22 @@ class OllamaProvider:
     model: str = PROVIDER_DEFAULT_MODELS["ollama"]
 
     def summarize(self, transcript: list[WordSpan], levels: int, prompt_extras: str) -> TopicTree:
+        llm = ChatOllama(
+            base_url=OLLAMA_BASE_URL(),
+            model=self.model,
+            temperature=0.0,
+            num_ctx=64000,
+        )
+        structured_llm = llm.with_structured_output(TOPIC_TREE_SCHEMA, method="json_schema")
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=_build_user_prompt(transcript, levels, prompt_extras)),
+        ]
         try:
-            import httpx
-        except ImportError as exc:
-            raise RuntimeError("The `httpx` package is not installed.") from exc
-
-        base = OLLAMA_BASE_URL().rstrip("/")
-        user_prompt = _build_user_prompt(transcript, levels, prompt_extras)
-        payload = {
-            "model": self.model,
-            "stream": False,
-            "format": "json",
-            "options": {"num_ctx": 64000, "num_predict": -1, "temperature": 0.0},
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        }
-        try:
-            with httpx.Client(timeout=600.0) as client:
-                resp = client.post(f"{base}/api/chat", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
+            result = structured_llm.invoke(messages)
         except Exception as exc:
-            raise RuntimeError(f"Ollama request to {base} failed: {exc}") from exc
-
-        # /api/chat returns {"message": {"role":"assistant","content":"..."}, ...}
-        text = ""
-        if isinstance(data, dict):
-            msg = data.get("message") or {}
-            if isinstance(msg, dict):
-                text = str(msg.get("content") or "")
-            if not text:
-                text = str(data.get("response") or "")
-        if not text:
-            raise RuntimeError("Ollama returned empty content.")
-        try:
-            parsed = json.loads(_extract_json_text(text))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Ollama returned non-JSON text: {exc}") from exc
-        return _coerce_tree(parsed)
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+        return _coerce_tree(result)
 
 
 # ----------------------------------------------------------------------------- #
