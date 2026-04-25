@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from autorag.db import Database
-    from autorag.reimagined_agent import TopicDict, TopicTree, WordSpan
+    from autorag.tiered_agent import TopicDict, TopicTree, WordSpan
 
 app = typer.Typer(help="AutoRAG — automated retrieval-augmented generation.")
 
@@ -170,7 +170,7 @@ def _transcribe(
     from autorag import whisper_runner
     from autorag.db import Database
     from autorag.providers import OLLAMA_BASE_URL
-    from autorag.reimagined_agent import transcribe as run_reimagined
+    from autorag.tiered_agent import transcribe as run_tiered
 
     if not file.is_file():
         typer.echo(f"Error: {file} is not a file.", err=True)
@@ -195,7 +195,7 @@ def _transcribe(
     import time as _time
 
     t_agent = _time.perf_counter()
-    agent_out = run_reimagined(
+    agent_out = run_tiered(
         file,
         whisper_model=whisper_model,
         language=language or None,
