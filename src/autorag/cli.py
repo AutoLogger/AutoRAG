@@ -49,7 +49,7 @@ def _transcribe(
     file: Path,
     title: str | None = None,
     whisper_model: str = "base",
-    provider: Literal["anthropic", "openai", "gemini", "ollama"] = "ollama",
+    provider: Literal["ollama"] = "ollama",
     llm_model: str = "llama3.1:8b",
     language: str = "",
     force_retranscribe: bool = False,
@@ -179,7 +179,7 @@ def transcribe(
         "ollama",
         "--provider",
         "-p",
-        help="LLM provider: anthropic, openai, gemini, ollama",
+        help="LLM provider (ollama)",
     ),
     llm_model: str = typer.Option(
         "llama3.1:8b",

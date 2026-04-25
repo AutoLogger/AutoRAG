@@ -28,9 +28,7 @@ class AutoRAG:
         self.settings = settings or get_settings()
         self.store = store or InMemoryStore()
         self.embedder = embedder or Embedder()
-        self.generator = generator or Generator(
-            model=self.settings.model, api_key=self.settings.anthropic_api_key
-        )
+        self.generator = generator or Generator(model=self.settings.model)
         self.retriever = Retriever(self.store, self.embedder)
 
     def ingest(self, paths: list[str | Path]) -> IngestResponse:

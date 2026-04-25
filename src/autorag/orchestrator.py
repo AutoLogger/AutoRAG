@@ -48,7 +48,7 @@ class SessionTranscriptionResult(TypedDict):
     inserted: int
     levels: list[int]
     transcript_cached: bool
-    provider: Literal["anthropic", "openai", "gemini", "ollama"]
+    provider: Literal["ollama"]
     llm_model: str
     device_used: str
     duration_secs: float
@@ -267,7 +267,7 @@ def run_session_transcription(
     *,
     whisper_model: str,
     language: str | None,
-    provider_name: Literal["anthropic", "openai", "gemini", "ollama"],
+    provider_name: Literal["ollama"],
     llm_model: str,
     force_retranscribe: bool,
     topic_category_ids: tuple[str, str, str],

@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     chunk_overlap: int = 200
     top_k: int = 5
     model: str = "claude-sonnet-4-6"
-    anthropic_api_key: str | None = None
     db_path: Path = Path("~/.autorag/autorag.db")
 
 

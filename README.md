@@ -7,16 +7,11 @@ Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic
 ## Quickstart
 
 ```bash
-# Install (Whisper + Torch are core deps; add a cloud provider if needed)
+# Install (Whisper + Torch are core deps)
 uv sync                        # installs core deps from the lock file
-uv sync --extra anthropic      # also installs Anthropic SDK
 
-# Transcribe using Ollama (default — no API key needed)
+# Transcribe using Ollama (no API key needed)
 autorag transcribe session.webm
-
-# Transcribe using Anthropic
-export AUTOLOGGER_ANTHROPIC_API_KEY=sk-ant-...
-autorag transcribe session.webm --provider anthropic --whisper-model small
 ```
 
 Output is a JSON list of topics printed to stdout. Timing info goes to stderr. The database is written to `~/.autorag/autorag.db` by default.
@@ -30,7 +25,7 @@ autorag transcribe FILE [OPTIONS]
 
   --title            -t  TEXT   Clip title (defaults to filename stem)
   --whisper-model    -w  TEXT   Whisper model: tiny/base/small/medium/large  [default: base]
-  --provider         -p  TEXT   LLM provider: anthropic, openai, gemini, ollama  [default: ollama]
+  --provider         -p  TEXT   LLM provider (ollama)  [default: ollama]
   --llm-model        -m  TEXT   LLM model name (uses provider default if omitted)
   --language         -l  TEXT   Whisper language code (auto-detect if empty)
   --force-retranscribe    FLAG  Re-run Whisper even if cached
@@ -98,49 +93,35 @@ Start the server with `autorag serve`, then:
 | GET    | `/viz/data`       | UMAP 3-D coordinates + cluster labels + similarity edges (JSON)       |
 | GET    | `/viz/search`     | Semantic search over topics — params: `q=<query>`, `top_k=10` (JSON) |
 
-## Providers
+## Provider
 
-| Provider  | Env var                        | Default model        | Install extra |
-|-----------|--------------------------------|----------------------|---------------|
-| ollama    | *(none — local)*               | llama3.1:8b          | *(built-in)*  |
-| anthropic | `AUTOLOGGER_ANTHROPIC_API_KEY` | claude-sonnet-4-6    | `.[anthropic]`|
-| openai    | `AUTOLOGGER_OPENAI_API_KEY`    | gpt-4o-mini          | `.[openai]`   |
-| gemini    | `AUTOLOGGER_GEMINI_API_KEY`    | gemini-2.0-flash     | `.[gemini]`   |
+Ollama is the only supported provider. It runs locally — no API key required.
 
-All providers receive the same system prompt asking for a 3-level JSON topic outline. Anthropic uses native tool-use for structured output; OpenAI uses `response_format: json_schema` (falling back to `json_object` for older models); Gemini uses `response_mime_type: application/json` with a schema; Ollama uses `format: json`.
+| Provider | Env var                      | Default model | Notes         |
+|----------|------------------------------|---------------|---------------|
+| ollama   | *(none — local)*             | llama3.1:8b   | *(built-in)*  |
+
+Ollama receives a system prompt asking for a 3-level JSON topic outline and uses `format: json` for structured output.
 
 ## Environment variables
 
 ### Transcription / providers (`AUTOLOGGER_` prefix)
 
-| Variable                       | Default                  | Description                                   |
-|--------------------------------|--------------------------|-----------------------------------------------|
-| `AUTOLOGGER_ANTHROPIC_API_KEY` | *(unset)*                | API key for Anthropic provider                |
-| `AUTOLOGGER_OPENAI_API_KEY`    | *(unset)*                | API key for OpenAI provider                   |
-| `AUTOLOGGER_GEMINI_API_KEY`    | *(unset)*                | API key for Gemini provider                   |
-| `AUTOLOGGER_OLLAMA_BASE_URL`   | `http://localhost:11434` | Ollama server URL                             |
-| `AUTOLOGGER_WHISPER_DEVICE`    | `auto`                   | `auto`, `cpu`, or `cuda`                      |
-| `AUTOLOGGER_EMBED_MODEL`       | `nomic-embed-text`       | Ollama model for topic title embeddings       |
+| Variable                     | Default                  | Description                             |
+|------------------------------|--------------------------|-----------------------------------------|
+| `AUTOLOGGER_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL                       |
+| `AUTOLOGGER_WHISPER_DEVICE`  | `auto`                   | `auto`, `cpu`, or `cuda`                |
+| `AUTOLOGGER_EMBED_MODEL`     | `nomic-embed-text`       | Ollama model for topic title embeddings |
 
 ### RAG / general (`AUTORAG_` prefix)
 
-| Variable                    | Default                  | Description                          |
-|-----------------------------|--------------------------|--------------------------------------|
-| `AUTORAG_DB_PATH`           | `~/.autorag/autorag.db`  | SQLite database path                 |
-| `AUTORAG_MODEL`             | `claude-sonnet-4-6`      | LLM used by the RAG generator        |
-| `AUTORAG_ANTHROPIC_API_KEY` | *(unset)*                | API key used by the RAG generator    |
-| `AUTORAG_CHUNK_SIZE`        | `1000`                   | Characters per chunk when ingesting  |
-| `AUTORAG_CHUNK_OVERLAP`     | `200`                    | Overlap between consecutive chunks  |
-| `AUTORAG_TOP_K`             | `5`                      | Default number of chunks to retrieve |
-
-## Optional dependencies
-
-```bash
-uv sync --extra anthropic    # Anthropic SDK
-uv sync --extra openai       # OpenAI SDK
-uv sync --extra gemini       # Google GenAI SDK
-uv sync --all-extras         # All cloud providers
-```
+| Variable            | Default                 | Description                          |
+|---------------------|-------------------------|--------------------------------------|
+| `AUTORAG_DB_PATH`   | `~/.autorag/autorag.db` | SQLite database path                 |
+| `AUTORAG_MODEL`     | `claude-sonnet-4-6`     | LLM used by the RAG generator        |
+| `AUTORAG_CHUNK_SIZE`    | `1000`              | Characters per chunk when ingesting  |
+| `AUTORAG_CHUNK_OVERLAP` | `200`               | Overlap between consecutive chunks  |
+| `AUTORAG_TOP_K`         | `5`                 | Default number of chunks to retrieve |
 
 Whisper and PyTorch are **core** dependencies and are always installed.
 
@@ -159,7 +140,7 @@ CREATE TABLE audio_clips (
     whisper_cache   TEXT,               -- raw Whisper output; internal use only
     topics          TEXT,               -- JSON: topic list (see below)
     whisper_model   TEXT,               -- e.g. "base"
-    provider        TEXT,               -- e.g. "anthropic"
+    provider        TEXT,               -- e.g. "ollama"
     llm_model       TEXT                -- e.g. "claude-sonnet-4-6"
 );
 ```

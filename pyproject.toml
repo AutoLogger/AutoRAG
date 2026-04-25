@@ -25,12 +25,6 @@ dependencies = [
     "chromadb>=1.5.8",
 ]
 
-[project.optional-dependencies]
-anthropic = ["anthropic>=0.25"]
-openai    = ["openai>=1.0"]
-gemini    = ["google-generativeai>=0.5"]
-all       = ["autorag[anthropic,openai,gemini]"]
-
 [project.scripts]
 autorag = "autorag.cli:app"
 
