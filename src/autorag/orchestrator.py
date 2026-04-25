@@ -1,10 +1,4 @@
-"""End-to-end Whisper -> LLM topic summarization orchestration.
-
-Exposes `run_session_transcription(db, session_id, ...)`. The caller is
-responsible for ensuring the three "Topic L1/L2/L3" categories exist and
-passing their ids via `topic_category_ids`. The orchestrator never creates
-categories itself.
-"""
+"""End-to-end Whisper -> LLM topic summarization orchestration."""
 
 from __future__ import annotations
 
@@ -120,7 +114,7 @@ def _enrich_segments(
         seg_id = str(seg.get("id") or "")
         resolved = _resolve_segment_file(db, session_id, seg_id)
         if resolved is not None:
-            path, _mime = resolved
+            path, _ = resolved
             out["file_path"] = str(path)
             try:
                 out["file_size"] = int(Path(path).stat().st_size)
@@ -275,7 +269,6 @@ def run_session_transcription(
     language: str | None,
     provider_name: Literal["anthropic", "openai", "gemini", "ollama"],
     llm_model: str,
-    replace_existing: bool,
     force_retranscribe: bool,
     topic_category_ids: tuple[str, str, str],
 ) -> SessionTranscriptionResult:
@@ -368,7 +361,7 @@ def run_session_transcription(
         raise RuntimeError(f"Provider {provider_name} call failed: {exc}") from exc
     timings["llm_summarize"] = time.perf_counter() - _t
 
-    if not isinstance(tree, dict) or "topics" not in tree:
+    if "topics" not in tree:
         raise RuntimeError(
             f"Provider {provider_name} returned malformed summary: missing top-level 'topics' field"
         )
@@ -407,7 +400,7 @@ def run_session_transcription(
             word_end_s = None
 
         summary = str(node.get("summary", "") or "").strip()
-        metadata = {
+        metadata: dict[str, Any] = {
             "transcription": {
                 "level": level,
                 "provider": provider_name,

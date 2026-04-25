@@ -87,7 +87,6 @@ def _transcribe(
         language=language or None,
         provider_name=provider,
         llm_model=llm_model,
-        replace_existing=True,
         force_retranscribe=force_retranscribe,
         topic_category_ids=("l1", "l2", "l3"),
     )
