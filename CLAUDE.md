@@ -18,7 +18,7 @@ Always use `uv`, never `pip` directly:
 
 ### LangChain agents (audio → transcript + topics)
 
-Three modules expose the same `transcribe(file)` / `build_*_agent()` surface,
+Four modules expose the same `transcribe(file)` / `build_*_agent()` surface,
 returning `{transcription, topics}`. Pick by trade-off:
 
 - `agent.py` — thin LCEL chain that reuses project helpers
@@ -27,24 +27,49 @@ returning `{transcription, topics}`. Pick by trade-off:
 - `reimagined_agent.py` — clean-room single-shot pipeline; defines its own
   Pydantic schema (3-level recursive type) and renamed dict keys (`s`/`e`
   instead of `start_s`/`end_s`). Single LLM call. Output dict shape is the
-  reference contract for the other agents.
+  reference contract for the other agents. Default model
+  `qwen2.5:14b-instruct-q8_0`, `num_ctx=16384`.
+- `tiered_agent.py` — multi-pass L0/L1/L2 with an explicit "decide
+  subdivide" gate per L1 and an aggregate L0 root. ~N+M+3 LLM calls
+  (~10 for a 7-min clip). Output is `{"topics": [L0]}` — a single root
+  with `L0.children = [L1...]`. Best balance of quality and cost; the
+  decide-gate prevents the over-eager nesting that produces zero-duration
+  ghost L3s. Recommended starting point for new work. Default model
+  `qwen2.5:14b-instruct-q8_0`.
 - `hierarchical_agent.py` — multi-pass divide-and-conquer pipeline (5
   stages, ~50–80 LLM calls, parallel-batched). Each call sees only its
-  parent's transcript slice, so containment is structural. Better topic
-  spans on weaker models (e.g. `llama3.1:8b`) at the cost of latency.
+  parent's transcript slice, so containment is structural. Use only when
+  you need the full L3 nesting and have the parallelism budget.
+
+The CLI (`cli.py`) currently invokes `reimagined_agent`. Switching it to
+`tiered_agent` requires no code changes other than the import + the call
+site, because `cli.py`'s 3-level traversal maps L0 → category `l1`,
+L1 → `l2`, L2 → `l3` (the L0 root replaces what reimagined called L1).
 
 ### Ollama tuning notes (server-side)
 
-Required for the hierarchical agent to work without crashes:
+`OLLAMA_NUM_PARALLEL` is the per-agent split:
 
-- `OLLAMA_NUM_PARALLEL` ≥ 4 — gives `Runnable.batch` real concurrency.
+- **`>= 4`** for multi-pass agents that batch (`hierarchical_agent`,
+  `tiered_agent` Stage 3a/3b). Required for `Runnable.batch` to actually
+  parallelize.
+- **`= 1`** for one-shot on a *bigger* model. Ollama pre-reserves all
+  `NUM_PARALLEL` slots' KV cache at the configured `num_ctx`, so 4 idle
+  slots steal VRAM that the bigger model needs. With `NUM_PARALLEL=1` on
+  a 24 GB GPU you can run `qwen2.5:14b-q8_0` (~15 GB) + `num_ctx=16384`
+  (~3 GB KV) with full GPU offload; 32K KV pushes some layers onto CPU.
+  Verify with `ollama ps` after a load.
+
+Other settings:
+
 - **Do NOT** combine `OLLAMA_FLASH_ATTENTION=1` with
   `OLLAMA_MULTIUSER_CACHE=true` and concurrent slots — triggers
   `GGML_ASSERT(is_full && "seq_cp() is only supported for full KV buffers")`.
   Drop `MULTIUSER_CACHE` (per-slot prefix cache still works).
-- Per-slot KV-cache sizing: at f16, 4 slots × 32K context exceeds 24 GB
-  VRAM. The hierarchical agent caps `num_ctx` at 16K for the L1 call and
-  8K for fan-out / summary calls to fit a 24 GB budget.
+- Per-slot KV-cache sizing (f16): the hierarchical agent caps `num_ctx`
+  at 16K for the L1 call and 8K for fan-out / summary calls to fit
+  4 slots × KV + ~9 GB model in a 24 GB budget. The tiered agent uses
+  the same defaults.
 
 ## Existing Conventions (preserve these)
 
