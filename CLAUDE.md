@@ -28,7 +28,7 @@ Always use `uv`, never `pip` directly:
 ## Third-Party Stubs
 
 These packages have no stubs — covered by mypy `ignore_missing_imports` overrides:
-- `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`
+- `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`, `chromadb`
 
 These packages have no stubs — suppress with `# type: ignore[import-untyped]` at the import site:
 - `sklearn` (used in `viz.py` and `topic_cluster.py`)

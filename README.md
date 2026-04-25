@@ -37,7 +37,7 @@ autorag transcribe FILE [OPTIONS]
   --db                   PATH  Override database path
 ```
 
-The same file always maps to the same session ID (UUID5 of its resolved path), so Whisper output is cached across runs. Re-running without `--force-retranscribe` skips Whisper and only re-runs the LLM topic extraction. After topics are stored, topic-title embeddings are computed via Ollama and written to the `embeddings` column for use by `/viz`.
+The same file always maps to the same session ID (UUID5 of its resolved path), so Whisper output is cached across runs. Re-running without `--force-retranscribe` skips Whisper and only re-runs the LLM topic extraction. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
 
 Timing breakdown is printed to stderr after each run:
 
@@ -102,7 +102,7 @@ Start the server with `autorag serve`, then:
 
 | Provider  | Env var                        | Default model        | Install extra |
 |-----------|--------------------------------|----------------------|---------------|
-| ollama    | *(none — local)*               | granite3.3:8b        | *(built-in)*  |
+| ollama    | *(none — local)*               | llama3.1:8b          | *(built-in)*  |
 | anthropic | `AUTOLOGGER_ANTHROPIC_API_KEY` | claude-sonnet-4-6    | `.[anthropic]`|
 | openai    | `AUTOLOGGER_OPENAI_API_KEY`    | gpt-4o-mini          | `.[openai]`   |
 | gemini    | `AUTOLOGGER_GEMINI_API_KEY`    | gemini-2.0-flash     | `.[gemini]`   |
@@ -160,10 +160,11 @@ CREATE TABLE audio_clips (
     topics          TEXT,               -- JSON: topic list (see below)
     whisper_model   TEXT,               -- e.g. "base"
     provider        TEXT,               -- e.g. "anthropic"
-    llm_model       TEXT,               -- e.g. "claude-sonnet-4-6"
-    embeddings      TEXT                -- JSON: list of float vectors, one per topic entry
+    llm_model       TEXT                -- e.g. "claude-sonnet-4-6"
 );
 ```
+
+Topic embeddings live alongside the SQLite db in a persistent Chroma collection (`<db_dir>/chroma/`, collection `audio_clip_topics`, cosine distance), keyed by `<clip_id>:<topic_index>`.
 
 ### `transcription` column
 
@@ -204,13 +205,9 @@ Hierarchical topics produced by the LLM, flattened to a list sorted by `start_s`
 | `duration_s` | Duration; the last sibling at each level extends to the transcript end |
 | `number`     | Hierarchical label, e.g. `"1.2.3"`                                     |
 
-### `embeddings` column
+### Topic embeddings (Chroma)
 
-Parallel list of float vectors corresponding 1-to-1 with the `topics` list. Each vector is produced by the Ollama embedding model (default: `nomic-embed-text`) from `"<title>. <summary>"`. Used by `/viz/data` and `/viz/search`.
-
-```json
-[[0.021, -0.134, ...], [0.098, 0.041, ...]]
-```
+Each topic's `"<title>. <summary>"` (or just `title` when there is no summary) is embedded with the Ollama embedding model (default: `nomic-embed-text`) and upserted into the `audio_clip_topics` Chroma collection. Each record carries the embedding plus metadata (`clip_id`, `clip_title`, `topic_index`, `title`, `summary`, `level`, `start_s`, `duration_s`, `number`); ids are `<clip_id>:<topic_index>` and `topic_index` refers to the position within the clip's filtered (title-bearing) topic list. Used by `/viz/data` and `/viz/search`.
 
 ## Visualization
 
@@ -287,7 +284,7 @@ autorag transcribe FILE
   │    └─ db.add_analytics_event() × N          Fanout topics
   ├─ db.store_transcription()      Persist word spans
   ├─ db.finalize_topics()          Compute durations, persist topics JSON
-  └─ topic_embed.embed_topic_titles()  Ollama embed → db.store_embeddings()
+  └─ Embedder().embed_texts()      Ollama embed → ChromaStore.add_topic_embeddings()
 
 autorag serve
   └─ FastAPI
@@ -296,11 +293,12 @@ autorag serve
        ├─ /viz          → viz.html (static)
        ├─ /viz/data GET → viz.viz_data()
        │    ├─ db.list_clips()
-       │    ├─ topic_embed.embed_topic_titles()  (missing vecs only)
+       │    ├─ ChromaStore.get_clip_embeddings()  (per clip)
+       │    ├─ Embedder().embed_texts()           (missing vecs only)
        │    ├─ viz.umap_3d()
        │    ├─ topic_cluster.cluster_embeddings()
        │    └─ topic_cluster.build_edges()
        └─ /viz/search GET → viz.viz_search()
-            ├─ topic_embed.embed_topic_titles([q])
-            └─ cosine_similarity(query, all_topics)
+            ├─ Embedder().embed_texts([q])
+            └─ ChromaStore.query(query_vec, top_k)
 ```

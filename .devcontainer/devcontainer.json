@@ -15,7 +15,7 @@
     }
   },
   "hostRequirements": {
-    "gpu": "optional" 
+    "gpu": "optional"
   },
   "runArgs": [
     "--cap-add=NET_ADMIN",
@@ -39,7 +39,7 @@
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=autologger-${devcontainerId},target=/home/.autologger,type=volume",
+    "source=autologger-${devcontainerId},target=/home/.autologger,type=volume"
     // "source=puppeteer-${devcontainerId}, target=/home/node/.cache/puppeteer,type=volume"
   ],
   "containerEnv": {

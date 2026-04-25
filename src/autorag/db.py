@@ -26,7 +26,6 @@ class AudioClip(BaseModel):
     whisper_model: str | None = None
     provider: str | None = None
     llm_model: str | None = None
-    embeddings: str | None = None
 
 
 class Database:
@@ -177,13 +176,6 @@ class Database:
         clip.provider = provider
         clip.llm_model = llm_model
         clip.whisper_model = whisper_model
-        self.db.add(_TABLE, clip, pk="id")
-
-    def store_embeddings(self, session_id: str, embeddings: list[list[float]]) -> None:
-        clip = self._row(session_id)
-        if clip is None:
-            return
-        clip.embeddings = json.dumps(embeddings)
         self.db.add(_TABLE, clip, pk="id")
 
     def get_clip(self, session_id: str) -> dict[str, Any] | None:

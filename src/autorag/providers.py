@@ -68,7 +68,7 @@ PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "gemini": "gemini-2.0-flash",
-    "ollama": "granite3.3:8b",
+    "ollama": "llama3.1:8b",
 }
 
 

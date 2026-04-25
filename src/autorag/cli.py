@@ -10,6 +10,7 @@ import typer
 
 from autorag.config import get_settings
 from autorag.core import AutoRAG
+from autorag.embed import Embedder
 
 if TYPE_CHECKING:
     from autorag.orchestrator import SessionTranscriptionResult
@@ -49,7 +50,7 @@ def _transcribe(
     title: str | None = None,
     whisper_model: str = "base",
     provider: Literal["anthropic", "openai", "gemini", "ollama"] = "ollama",
-    llm_model: str = "granite3.3:8b",
+    llm_model: str = "llama3.1:8b",
     language: str = "",
     force_retranscribe: bool = False,
     db_override: Path | None = None,
@@ -116,20 +117,25 @@ def _transcribe(
     _t = _time.perf_counter()
     clip_data = db.get_clip(session_id)
     if clip_data and clip_data.get("topics"):
-        _topics = json.loads(clip_data["topics"])
-        from autorag.topic_embed import embed_topic_titles
+        from autorag.store import ChromaStore, default_chroma_dir
 
+        _topics = [t for t in json.loads(clip_data["topics"]) if t.get("title")]
         _texts = [
-            f"{t['title']}. {t['summary']}" if t.get("summary") else t["title"]
-            for t in _topics
-            if t.get("title")
+            f"{t['title']}. {t['summary']}" if t.get("summary") else t["title"] for t in _topics
         ]
         if _texts:
             try:
-                _embeddings = embed_topic_titles(_texts)
-                db.store_embeddings(session_id, _embeddings)
+                _embeddings = Embedder().embed_texts(_texts)
+                _chroma = ChromaStore(default_chroma_dir(db_path))
+                _chroma.delete_clip(session_id)
+                _chroma.add_topic_embeddings(
+                    session_id,
+                    str(clip_data.get("title", "")),
+                    _topics,
+                    _embeddings,
+                )
             except Exception as _exc:
-                typer.echo(f"Warning: embedding computation failed: {_exc}", err=True)
+                typer.echo(f"Warning: embedding/index failed: {_exc}", err=True)
     cli_embed_s = _time.perf_counter() - _t
 
     timings = result.get("timings", {})
@@ -176,7 +182,7 @@ def transcribe(
         help="LLM provider: anthropic, openai, gemini, ollama",
     ),
     llm_model: str = typer.Option(
-        "granite3.3:8b",
+        "llama3.1:8b",
         "--llm-model",
         "-m",
         help="LLM model name (uses provider default if empty)",

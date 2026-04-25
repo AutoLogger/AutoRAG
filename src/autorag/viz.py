@@ -1,4 +1,4 @@
-"""Topic embedding visualization: Ollama embeddings + UMAP + FastAPI endpoints."""
+"""Topic embedding visualization: Chroma-backed embeddings + UMAP + FastAPI endpoints."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ import umap
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sklearn.metrics.pairwise import cosine_similarity as sk_cosine  # type: ignore[import-untyped]
 
 from autorag.config import get_settings
 from autorag.db import Database
+from autorag.embed import Embedder
+from autorag.store import ChromaStore, default_chroma_dir
 from autorag.topic_cluster import build_edges, cluster_embeddings
-from autorag.topic_embed import embed_topic_titles
 
 router = APIRouter()
 
@@ -98,11 +98,21 @@ def umap_3d(embeddings: list[list[float]]) -> npt.NDArray[np.float64]:
 # ---------------------------------------------------------------------------
 
 
+Row = tuple[str, str, dict[str, Any], int]
+"""A single point in the viz: (clip_id, clip_title, topic, topic_index)."""
+
+
 def _collect_rows_embeddings(
     clips: list[dict[str, Any]],
-) -> tuple[list[tuple[str, str, dict[str, Any]]], list[list[float]]]:
-    """Build (rows, embeddings) from clip records, filling missing vecs via Ollama."""
-    rows: list[tuple[str, str, dict[str, Any]]] = []
+    chroma: ChromaStore,
+) -> tuple[list[Row], list[list[float]]]:
+    """Build (rows, embeddings) from clip records, filling missing vecs via Ollama.
+
+    ``topic_index`` is the position of the topic within the clip's filtered
+    (title-bearing) topic list — same convention used by ``cli._transcribe``
+    when writing into Chroma.
+    """
+    rows: list[Row] = []
     for clip in clips:
         raw = clip.get("topics")
         if not raw:
@@ -111,49 +121,60 @@ def _collect_rows_embeddings(
             topics = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             continue
-        for t in topics:
-            if t.get("title"):
-                rows.append((clip["id"], clip["title"], t))
+        topics = [t for t in topics if t.get("title")]
+        for i, t in enumerate(topics):
+            rows.append((clip["id"], clip["title"], t, i))
 
     if not rows:
         return [], []
 
-    stored: dict[str, dict[str, list[float]]] = {}
+    stored: dict[str, dict[int, list[float]]] = {}
     for clip in clips:
-        raw_emb = clip.get("embeddings")
-        raw_topics = clip.get("topics")
-        if not raw_emb or not raw_topics:
-            continue
         try:
-            emb_list: list[list[float]] = json.loads(raw_emb)
-            topic_list: list[dict[str, Any]] = json.loads(raw_topics)
-            stored[clip["id"]] = {
-                t["title"]: emb_list[i]
-                for i, t in enumerate(topic_list)
-                if t.get("title") and i < len(emb_list)
-            }
-        except (json.JSONDecodeError, TypeError, IndexError):
-            pass
+            stored[clip["id"]] = chroma.get_clip_embeddings(clip["id"])
+        except Exception:
+            stored[clip["id"]] = {}
 
     embeddings: list[list[float] | None] = []
-    missing_indices: list[int] = []
-
-    for i, (clip_id, _clip_title, t) in enumerate(rows):
-        vec = stored.get(clip_id, {}).get(t["title"])
+    missing_per_clip: dict[str, list[tuple[int, dict[str, Any], int]]] = {}
+    for row_idx, (clip_id, _clip_title, t, topic_index) in enumerate(rows):
+        vec = stored.get(clip_id, {}).get(topic_index)
         embeddings.append(vec)
         if vec is None:
-            missing_indices.append(i)
+            missing_per_clip.setdefault(clip_id, []).append((row_idx, t, topic_index))
 
-    if missing_indices:
-        missing_texts = [
-            f"{rows[idx][2]['title']}. {rows[idx][2]['summary']}"
-            if rows[idx][2].get("summary")
-            else rows[idx][2]["title"]
-            for idx in missing_indices
-        ]
-        computed = embed_topic_titles(missing_texts)
-        for idx, vec in zip(missing_indices, computed, strict=False):
-            embeddings[idx] = vec
+    if missing_per_clip:
+        all_texts: list[str] = []
+        flat: list[tuple[int, dict[str, Any], int]] = []
+        for items in missing_per_clip.values():
+            for row_idx, t, topic_index in items:
+                text = f"{t['title']}. {t['summary']}" if t.get("summary") else t["title"]
+                all_texts.append(text)
+                flat.append((row_idx, t, topic_index))
+
+        computed = Embedder().embed_texts(all_texts)
+        for (row_idx, _t, _topic_index), vec in zip(flat, computed, strict=True):
+            embeddings[row_idx] = vec
+
+        clip_titles = {clip["id"]: clip.get("title", "") for clip in clips}
+        for clip_id, items in missing_per_clip.items():
+            current = dict(stored.get(clip_id, {}))
+            for row_idx, _t, topic_index in items:
+                vec = embeddings[row_idx]
+                if vec is not None:
+                    current[topic_index] = vec
+            topic_lookup = {ti: t for cid, _, t, ti in rows if cid == clip_id}
+            ordered_indices = [idx for idx in sorted(current.keys()) if idx in topic_lookup]
+            try:
+                chroma.delete_clip(clip_id)
+                chroma.add_topic_embeddings(
+                    clip_id,
+                    str(clip_titles.get(clip_id, "")),
+                    [topic_lookup[idx] for idx in ordered_indices],
+                    [current[idx] for idx in ordered_indices],
+                )
+            except Exception:
+                pass
 
     return rows, [e for e in embeddings if e is not None]
 
@@ -173,11 +194,13 @@ def viz_data(
     distance_threshold: float = Query(default=0.35, ge=0.0, le=1.0),
 ) -> VizData:
     settings = get_settings()
-    db = Database(settings.db_path.expanduser())
+    db_path = settings.db_path.expanduser()
+    db = Database(db_path)
     clips = db.list_clips()
+    chroma = ChromaStore(default_chroma_dir(db_path))
 
     try:
-        rows, embeddings = _collect_rows_embeddings(clips)
+        rows, embeddings = _collect_rows_embeddings(clips, chroma)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -197,7 +220,7 @@ def viz_data(
     raw_edges = build_edges(emb_matrix)
 
     seen: dict[str, str] = {}
-    for clip_id, clip_title, _ in rows:
+    for clip_id, clip_title, _, _ in rows:
         seen.setdefault(clip_id, clip_title)
     clip_ids = list(seen.keys())
 
@@ -216,7 +239,7 @@ def viz_data(
             z=float(coords[i, 2]),
             cluster_id=int(cluster_labels[i]) if i < len(cluster_labels) else 0,
         )
-        for i, (clip_id, clip_title, t) in enumerate(rows)
+        for i, (clip_id, clip_title, t, _topic_index) in enumerate(rows)
     ]
 
     edges = [Edge(a=a, b=b, similarity=s) for a, b, s in raw_edges]
@@ -242,36 +265,40 @@ def viz_search(
     if not q:
         return []
 
+    settings = get_settings()
+    db_path = settings.db_path.expanduser()
+    db = Database(db_path)
+    clips = db.list_clips()
+    chroma = ChromaStore(default_chroma_dir(db_path))
+
     try:
-        query_vec = embed_topic_titles([q])[0]
+        query_vec = Embedder().embed_texts([q])[0]
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    settings = get_settings()
-    db = Database(settings.db_path.expanduser())
-    clips = db.list_clips()
-
     try:
-        rows, embeddings = _collect_rows_embeddings(clips)
+        rows, _embeddings = _collect_rows_embeddings(clips, chroma)
+        results = chroma.query(query_vec, top_k=top_k)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if not rows:
         return []
 
-    query_arr = np.array(query_vec, dtype=np.float64).reshape(1, -1)
-    emb_matrix = np.array(embeddings, dtype=np.float64)
-    sims = sk_cosine(query_arr, emb_matrix)[0]
-
-    top_indices = np.argsort(sims)[::-1][:top_k]
-    return [
-        SearchResult(
-            point_index=int(idx),
-            topic_title=rows[idx][2]["title"],
-            clip_title=rows[idx][1],
-            clip_id=rows[idx][0],
-            similarity=float(sims[idx]),
-            summary=str(rows[idx][2].get("summary", "")),
+    row_lookup = {(r[0], r[3]): i for i, r in enumerate(rows)}
+    out: list[SearchResult] = []
+    for r in results:
+        key = (r["clip_id"], r["topic_index"])
+        if key not in row_lookup:
+            continue
+        out.append(
+            SearchResult(
+                point_index=row_lookup[key],
+                topic_title=str(r["title"]),
+                clip_title=str(r["clip_title"]),
+                clip_id=str(r["clip_id"]),
+                similarity=float(r["similarity"]),
+                summary=str(r["summary"]),
+            )
         )
-        for idx in top_indices
-    ]
+    return out
