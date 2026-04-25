@@ -68,6 +68,9 @@ ignore = [
     "ANN401",  # Any — needed for torch/whisper interop
     "B008",    # function calls in default args — conflicts with FastAPI Depends pattern
 ]
+unfixable = [
+    "F401",  # unused imports — don't auto-remove; files may be edited incrementally
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN"]
