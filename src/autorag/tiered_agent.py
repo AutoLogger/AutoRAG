@@ -4,23 +4,26 @@ Sibling to `agent.py`, `reimagined_agent.py`, and `hierarchical_agent.py`.
 Same `transcribe(file)` / `build_tiered_agent()` surface and same
 `TranscriptionResult` output keys (`s`/`e`/`title`/`summary`/`children`).
 
-Pipeline:
+Pipeline (each LLM stage has one focused job):
 
-    1. Whisper                             -> list[WordSpan]               1 call
-    2. L1 extract  (single LLM call)       -> list[L1 topic]               1 LLM
-    3a Decide subdivide  (per L1, batched) -> list[bool]                   N LLM
-    3b L2 extract  (per yes-L1, batched)   -> list[list[L2 topic]]         M LLM (M<=N)
-    4. L0 aggregate                        -> {title, summary}             1 LLM
+    1. Whisper                              -> list[WordSpan]               1 call
+    2. L1 boundaries  (single LLM call)     -> list[{s,e}]                  1 LLM
+    3a Decide subdivide  (per long L1)      -> list[bool]                   N LLM
+    3b L2 boundaries  (per yes-L1, batched) -> list[list[{s,e}]]            M LLM (M<=N)
+    4. Summarize nodes  (per L1+L2, batched)-> {title,summary} per node     K LLM
+    5. L0 aggregate                         -> {title, summary}             1 LLM
 
 Final shape: `{"topics": [L0]}` with `L0.children = [L1...]`, each
 `L1.children = [L2...]` or `[]`. The L0 root is the explicit "what is this
 audio about" node — replaces the L3 layer that reimagined / hierarchical
 produce.
 
-Why multi-pass: one-shot agents on small models routinely under-split or
-over-split. Splitting the work into L1 -> decide -> L2 -> L0 lets each LLM
-call have one focused job, and the explicit "should I subdivide?" gate
-stops the over-eager nesting that produces zero-duration ghost L3s.
+Why separate boundaries from summaries: boundary calls operate on the
+timestamped transcript and emit only `{s, e}`; the per-node summary call
+operates on the slice's plain text (no timestamps) and emits
+`{title, summary}`. Each call has one job, which is easier for small
+models and lets the K=N1+N2 summary calls share an identical prompt
+prefix for cache reuse.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ import whisper
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langchain_ollama import ChatOllama
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +68,13 @@ class TranscriptionResult(TypedDict):
     topics: TopicTree
 
 
-class _L1Topic(BaseModel):
-    title: str
-    summary: str
+class _Boundary(BaseModel):
     s: float
     e: float
-    children: list[Any] = Field(max_length=0)
 
 
-class _L1List(BaseModel):
-    topics: list[_L1Topic]
+class _BoundaryList(BaseModel):
+    topics: list[_Boundary]
 
 
 class _SubdivideDecision(BaseModel):
@@ -85,16 +85,9 @@ class _SubdivideDecision(BaseModel):
     subdivide: bool
 
 
-class _L2Topic(BaseModel):
+class _NodeSummary(BaseModel):
     title: str
     summary: str
-    s: float
-    e: float
-    children: list[Any] = Field(max_length=0)
-
-
-class _L2List(BaseModel):
-    topics: list[_L2Topic]
 
 
 class _L0Summary(BaseModel):
@@ -103,70 +96,29 @@ class _L0Summary(BaseModel):
 
 
 _L1_SYS = (
-    "You are a transcript outliner. You receive a recording's word-level "
-    "transcript and must produce a flat list of top-level (L1) topics that "
-    "summarize what was discussed.\n\n"
+    "You are a topic boundary detector. You receive a recording's "
+    "word-level transcript (one word per line as 's=12.34 word') and "
+    "must split it into ordered, non-overlapping top-level (L1) topics "
+    "that TILE the audio from start to end.\n\n"
     "Rules:\n"
-    "1. Produce a flat list of L1 topics. Do NOT nest subtopics here -- "
-    "subtopics will be requested in a later pass. Every topic's children "
-    "list must be empty.\n"
-    "2. Each topic has a `title` (<=120 chars), a `summary` (2-4 sentences), "
-    "and an interval [s, e] in seconds. `s` is the start of the FIRST word "
-    "the topic covers; `e` is the end of the LAST word it covers. Topics "
-    "typically span tens to hundreds of seconds, not single words.\n"
-    "3. Sibling topics TILE the audio with no gaps and no overlap. Order "
-    "siblings by time. For adjacent siblings A then B, set B.s = A.e. The "
-    "first topic's s equals 0.0 (or the audio start); the last topic's e "
-    "equals the audio end.\n"
-    "4. Each piece of content appears at exactly ONE position. Do NOT "
-    "duplicate the same topic across siblings.\n"
-    "5. Use only timestamps that come from the transcript. Do not invent "
-    "topics that are not present in the transcript.\n"
-)
-_L1_FEWSHOT = (
-    "Example shape ONLY (illustrative -- DO NOT copy these timestamps; the "
-    "example uses a fictitious 29-minute (1740s) cooking-show audio whose "
-    "duration will be very different from yours). Properties to imitate: a "
-    "flat list of L1 topics that TILE the full audio end-to-end; every "
-    "children array is exactly []; no zero-duration intervals.\n"
-    "{{\n"
-    '  "topics": [\n'
-    "    {{\n"
-    '      "title": "Mise en place and equipment",\n'
-    '      "summary": "Host walks through the prep workflow and the '
-    'knives, pans, and timer setup needed before cooking begins.",\n'
-    '      "s": 0.0, "e": 423.0, "children": []\n'
-    "    }},\n"
-    "    {{\n"
-    '      "title": "Building the base sauce",\n'
-    '      "summary": "Sweats aromatics, deglazes the pan, and reduces '
-    'the stock to a base.",\n'
-    '      "s": 423.0, "e": 911.0, "children": []\n'
-    "    }},\n"
-    "    {{\n"
-    '      "title": "Searing and resting the protein",\n'
-    '      "summary": "Pat-dry, high-heat sear, transfer to oven, then '
-    'rest before slicing.",\n'
-    '      "s": 911.0, "e": 1402.0, "children": []\n'
-    "    }},\n"
-    "    {{\n"
-    '      "title": "Plating and tasting notes",\n'
-    '      "summary": "Final assembly, seasoning adjustments, and the '
-    "host's tasting commentary.\",\n"
-    '      "s": 1402.0, "e": 1740.0, "children": []\n'
-    "    }}\n"
-    "  ]\n"
-    "}}\n"
+    "1. Return ONLY intervals -- no titles, no summaries. Each item is "
+    '{{"s": <float>, "e": <float>}}.\n'
+    "2. The first topic's `s` equals 0.0 (or the audio start); the last "
+    "topic's `e` equals the audio end.\n"
+    "3. Adjacent topics tile end-to-start: for siblings A then B, set "
+    "B.s = A.e (no gaps, no overlap). Order siblings by time.\n"
+    "4. Aim for roughly the suggested topic count -- it is calibrated to "
+    "duration. Do NOT over-split into 15+ tiny topics; do NOT collapse "
+    "into a single topic unless the audio is very short.\n"
+    "5. Topics typically span tens to hundreds of seconds, not single "
+    "words.\n"
+    "6. Use timestamp values that come directly from the transcript "
+    "lines. Do not invent timestamps."
 )
 _L1_HUMAN = (
     "Audio runs from 0.00 to {audio_e} seconds (~{duration_min:.1f} min). "
-    "Suggested topic count: ~{target_count} (calibrated to duration; do "
-    "not over-split into 15+ tiny topics, do not collapse into a single "
-    "topic).\n\n"
-    "Follow this example shape exactly (your titles and summaries must "
-    "come from the actual transcript below, not from this example):\n"
-    "{fewshot}\n"
-    "Time anchors (evenly-sampled words across the audio - use these to "
+    "Suggested topic count: ~{target_count}.\n\n"
+    "Time anchors (evenly-sampled words across the audio -- use these to "
     "see the full duration and spread topics across it; do NOT cluster "
     "topics near the start):\n"
     "{anchors}\n\n"
@@ -186,67 +138,47 @@ _DECIDE_SYS = (
     "3. The `reason` field should be one short sentence describing why."
 )
 _DECIDE_HUMAN = (
-    "Passage spans [{slice_s} -> {slice_e}] seconds (~{duration_min:.1f} min).\n\n"
-    "Transcript (one word per line as 's=12.34 word'):\n{transcript}"
+    "Passage runs ~{duration_min:.1f} minutes.\n\nTranscript (plain text):\n{transcript}"
 )
 
 _L2_SYS = (
-    "You are a transcript outliner. You receive a SLICE of a longer "
-    "recording's word-level transcript and must produce the subtopics "
-    "that subdivide this slice.\n\n"
+    "You are a topic boundary detector. You receive a SLICE of a longer "
+    "recording's word-level transcript (one word per line as "
+    "'s=12.34 word') and must split it into ordered, non-overlapping "
+    "subtopics that TILE the slice from start to end.\n\n"
     "Rules:\n"
-    "1. Produce a flat list of subtopics. Every topic's children list must "
-    "be empty.\n"
-    "2. Each topic has a `title` (<=120 chars), a `summary` (2-4 sentences), "
-    "and an interval [s, e] in seconds. `s` is the start of the FIRST word "
-    "the topic covers; `e` is the end of the LAST word it covers.\n"
-    "3. Sibling topics TILE the slice with no gaps and no overlap. Order "
-    "siblings by time. For adjacent siblings A then B, set B.s = A.e. The "
-    "first topic's s equals the slice start; the last topic's e equals "
-    "the slice end.\n"
-    "4. Use only timestamps that come from the transcript slice. Do not "
-    "invent subtopics that are not present.\n"
-)
-_L2_FEWSHOT = (
-    "Example shape ONLY (illustrative -- DO NOT copy these timestamps; the "
-    "example uses a fictitious 6-minute slice from 1200.0 to 1560.0 "
-    "seconds). Properties to imitate: a flat list of subtopics that tile "
-    "the slice end-to-end; every children array is exactly [].\n"
-    "{{\n"
-    '  "topics": [\n'
-    "    {{\n"
-    '      "title": "Sear technique",\n'
-    '      "summary": "Why a dry surface matters and how to avoid '
-    'overcrowding the pan.",\n'
-    '      "s": 1200.0, "e": 1340.0, "children": []\n'
-    "    }},\n"
-    "    {{\n"
-    '      "title": "Resting and slicing",\n'
-    '      "summary": "Rest time relative to thickness; slicing against '
-    'the grain.",\n'
-    '      "s": 1340.0, "e": 1480.0, "children": []\n'
-    "    }},\n"
-    "    {{\n"
-    '      "title": "Plating",\n'
-    '      "summary": "Final assembly and seasoning adjustments.",\n'
-    '      "s": 1480.0, "e": 1560.0, "children": []\n'
-    "    }}\n"
-    "  ]\n"
-    "}}\n"
+    "1. Return ONLY intervals -- no titles, no summaries. Each item is "
+    '{{"s": <float>, "e": <float>}}.\n'
+    "2. The first subtopic's `s` equals the slice start; the last "
+    "subtopic's `e` equals the slice end.\n"
+    "3. Adjacent subtopics tile end-to-start: for siblings A then B, set "
+    "B.s = A.e (no gaps, no overlap). Order by time.\n"
+    "4. Use timestamp values that come directly from the transcript "
+    "lines. Do not invent timestamps."
 )
 _L2_HUMAN = (
-    "Slice spans [{slice_s} -> {slice_e}] seconds (~{duration_min:.1f} min). "
-    "Suggested subtopic count: ~{target_count}. Produce at least 2 "
-    "subtopics that together tile the slice; if you genuinely cannot find "
-    "2 distinct subjects, return exactly 2 anyway by splitting on the "
-    "clearest natural break.\n\n"
-    "Follow this example shape exactly (your titles and summaries must "
-    "come from the slice's transcript below, not from this example):\n"
-    "{fewshot}\n"
+    "Slice spans [{slice_s} to {slice_e}] seconds (~{duration_min:.1f} "
+    "min). Suggested subtopic count: ~{target_count}. Produce at least "
+    "2 subtopics that together tile the slice; if you genuinely cannot "
+    "find 2 distinct subjects, return exactly 2 anyway by splitting on "
+    "the clearest natural break.\n\n"
     "Time anchors (evenly-sampled words across the slice):\n"
     "{anchors}\n\n"
     "Slice transcript (one word per line as 's=12.34 word'):\n{transcript}"
 )
+
+_NODE_SUM_SYS = (
+    "You summarize a passage of transcribed speech. Given the passage "
+    "text, return a short title and a 1-2 sentence summary describing "
+    "what was said.\n\n"
+    "Rules:\n"
+    "1. `title` is a noun phrase, at most 120 characters. No trailing "
+    "punctuation. Not a full sentence.\n"
+    "2. `summary` is 1-2 sentences describing the passage's content.\n"
+    "3. Do not invent content beyond what the passage says. Do not "
+    "speculate about surrounding context."
+)
+_NODE_SUM_HUMAN = "Passage:\n{text}"
 
 _AGG_SYS = (
     "You are summarizing a whole audio from its top-level topics. Given "
@@ -286,6 +218,15 @@ def _format_transcript(spans: list[WordSpan]) -> str:
             continue
         lines.append(f"s={float(ws.get('s', 0.0)):.2f} {token}")
     return "\n".join(lines)
+
+
+def _format_words_only(spans: list[WordSpan]) -> str:
+    parts: list[str] = []
+    for ws in spans:
+        token = str(ws.get("w", "")).strip()
+        if token:
+            parts.append(token)
+    return " ".join(parts)
 
 
 def _format_children(children: list[TopicDict]) -> str:
@@ -399,28 +340,37 @@ def build_tiered_agent(
     if ollama_base_url:
         base_kwargs["base_url"] = ollama_base_url
 
-    l1_llm = ChatOllama(num_ctx=num_ctx_l1, **base_kwargs).with_structured_output(
-        _L1List, method="json_schema"
+    boundary_llm_l1 = ChatOllama(num_ctx=num_ctx_l1, **base_kwargs).with_structured_output(
+        _BoundaryList, method="json_schema"
+    )
+    boundary_llm_fanout = ChatOllama(num_ctx=num_ctx_fanout, **base_kwargs).with_structured_output(
+        _BoundaryList, method="json_schema"
     )
     decide_llm = ChatOllama(num_ctx=num_ctx_fanout, **base_kwargs).with_structured_output(
         _SubdivideDecision, method="json_schema"
     )
-    l2_llm = ChatOllama(num_ctx=num_ctx_fanout, **base_kwargs).with_structured_output(
-        _L2List, method="json_schema"
+    node_sum_llm = ChatOllama(num_ctx=num_ctx_fanout, **base_kwargs).with_structured_output(
+        _NodeSummary, method="json_schema"
     )
     agg_llm = ChatOllama(num_ctx=num_ctx_fanout, **base_kwargs).with_structured_output(
         _L0Summary, method="json_schema"
     )
 
     l1_chain = (
-        ChatPromptTemplate.from_messages([("system", _L1_SYS), ("human", _L1_HUMAN)]) | l1_llm
+        ChatPromptTemplate.from_messages([("system", _L1_SYS), ("human", _L1_HUMAN)])
+        | boundary_llm_l1
     )
     decide_chain = (
         ChatPromptTemplate.from_messages([("system", _DECIDE_SYS), ("human", _DECIDE_HUMAN)])
         | decide_llm
     )
     l2_chain = (
-        ChatPromptTemplate.from_messages([("system", _L2_SYS), ("human", _L2_HUMAN)]) | l2_llm
+        ChatPromptTemplate.from_messages([("system", _L2_SYS), ("human", _L2_HUMAN)])
+        | boundary_llm_fanout
+    )
+    node_sum_chain = (
+        ChatPromptTemplate.from_messages([("system", _NODE_SUM_SYS), ("human", _NODE_SUM_HUMAN)])
+        | node_sum_llm
     )
     agg_chain = (
         ChatPromptTemplate.from_messages([("system", _AGG_SYS), ("human", _AGG_HUMAN)]) | agg_llm
@@ -428,23 +378,20 @@ def build_tiered_agent(
 
     batch_cfg: RunnableConfig = {"max_concurrency": max_concurrency}
 
-    def _extract_l1(spans: list[WordSpan], audio_e: float) -> list[TopicDict]:
+    def _extract_l1_boundaries(spans: list[WordSpan], audio_e: float) -> list[TopicDict]:
         result = cast(
-            "_L1List",
+            "_BoundaryList",
             l1_chain.invoke(
                 {
                     "transcript": _format_transcript(spans),
                     "anchors": _time_anchors(spans),
-                    "fewshot": _L1_FEWSHOT,
                     "audio_e": f"{audio_e:.2f}",
                     "duration_min": audio_e / 60.0,
                     "target_count": _target_count(0.0, audio_e),
                 }
             ),
         )
-        nodes: list[TopicDict] = [
-            _new_node(t.s, t.e, title=t.title, summary=t.summary) for t in result.topics
-        ]
+        nodes: list[TopicDict] = [_new_node(b.s, b.e) for b in result.topics]
         _snap_tile(nodes, 0.0, audio_e)
         nodes = _drop_zero(nodes)
         if not nodes:
@@ -466,9 +413,7 @@ def build_tiered_agent(
             long_indices.append(i)
             long_inputs.append(
                 {
-                    "transcript": _format_transcript(sliced),
-                    "slice_s": f"{ls:.2f}",
-                    "slice_e": f"{le:.2f}",
+                    "transcript": _format_words_only(sliced),
                     "duration_min": (le - ls) / 60.0,
                 }
             )
@@ -482,7 +427,7 @@ def build_tiered_agent(
             decisions[idx] = bool(dec.subdivide)
         return decisions
 
-    def _extract_l2_batch(
+    def _extract_l2_boundaries_batch(
         yes_l1_nodes: list[TopicDict], spans: list[WordSpan]
     ) -> list[list[TopicDict]]:
         if not yes_l1_nodes:
@@ -496,25 +441,45 @@ def build_tiered_agent(
                 {
                     "transcript": _format_transcript(sliced),
                     "anchors": _time_anchors(sliced),
-                    "fewshot": _L2_FEWSHOT,
                     "slice_s": f"{ls:.2f}",
                     "slice_e": f"{le:.2f}",
                     "duration_min": (le - ls) / 60.0,
                     "target_count": _target_count(ls, le),
                 }
             )
-        results = cast("list[_L2List]", l2_chain.batch(inputs, config=batch_cfg))
+        results = cast("list[_BoundaryList]", l2_chain.batch(inputs, config=batch_cfg))
         out: list[list[TopicDict]] = []
         for r, l1 in zip(results, yes_l1_nodes, strict=True):
             ls = float(l1.get("s", 0.0))
             le = float(l1.get("e", 0.0))
-            kids: list[TopicDict] = [
-                _new_node(t.s, t.e, title=t.title, summary=t.summary) for t in r.topics
-            ]
+            kids: list[TopicDict] = [_new_node(b.s, b.e) for b in r.topics]
             _snap_tile(kids, ls, le)
             kids = _drop_zero(kids)
             out.append(kids)
         return out
+
+    def _summarize_nodes_batch(nodes: list[TopicDict], spans: list[WordSpan]) -> None:
+        if not nodes:
+            return
+        inputs: list[dict[str, Any]] = []
+        keep_idx: list[int] = []
+        for i, n in enumerate(nodes):
+            ns = float(n.get("s", 0.0))
+            ne = float(n.get("e", 0.0))
+            text = _format_words_only(_slice_spans(spans, ns, ne))
+            if not text.strip():
+                continue
+            keep_idx.append(i)
+            inputs.append({"text": text})
+        if not inputs:
+            return
+        results = cast(
+            "list[_NodeSummary]",
+            node_sum_chain.batch(inputs, config=batch_cfg),
+        )
+        for idx, summ in zip(keep_idx, results, strict=True):
+            nodes[idx]["title"] = summ.title
+            nodes[idx]["summary"] = summ.summary
 
     def _aggregate_l0(l1_nodes: list[TopicDict], audio_e: float) -> TopicDict:
         if not l1_nodes:
@@ -531,9 +496,9 @@ def build_tiered_agent(
 
         audio_e = _audio_end(spans)
 
-        logger.info("Stage 2 (L1 extract): 1 call, num_ctx=%d", num_ctx_l1)
+        logger.info("Stage 2 (L1 boundaries): 1 call, num_ctx=%d", num_ctx_l1)
         t0 = time.time()
-        l1_nodes = _extract_l1(spans, audio_e)
+        l1_nodes = _extract_l1_boundaries(spans, audio_e)
         logger.info("Stage 2 done in %.1fs (%d L1 topics)", time.time() - t0, len(l1_nodes))
 
         logger.info(
@@ -552,19 +517,29 @@ def build_tiered_agent(
         )
 
         yes_l1_nodes = [l1 for l1, d in zip(l1_nodes, decisions, strict=True) if d]
-        logger.info("Stage 3b (L2 extract): %d batched calls", len(yes_l1_nodes))
+        logger.info("Stage 3b (L2 boundaries): %d batched calls", len(yes_l1_nodes))
         t0 = time.time()
-        l2_lists = _extract_l2_batch(yes_l1_nodes, spans)
+        l2_lists = _extract_l2_boundaries_batch(yes_l1_nodes, spans)
         for l1, kids in zip(yes_l1_nodes, l2_lists, strict=True):
             l1["children"] = kids
         l2_total = sum(len(k) for k in l2_lists)
         logger.info("Stage 3b done in %.1fs (%d L2 topics)", time.time() - t0, l2_total)
 
-        logger.info("Stage 4 (L0 aggregate): 1 call")
+        nodes_to_summarize: list[TopicDict] = []
+        for l1 in l1_nodes:
+            nodes_to_summarize.append(l1)
+            for l2 in l1.get("children") or []:
+                nodes_to_summarize.append(l2)
+        logger.info("Stage 4 (summarize nodes): %d batched calls", len(nodes_to_summarize))
+        t0 = time.time()
+        _summarize_nodes_batch(nodes_to_summarize, spans)
+        logger.info("Stage 4 done in %.1fs", time.time() - t0)
+
+        logger.info("Stage 5 (L0 aggregate): 1 call")
         t0 = time.time()
         l0 = _aggregate_l0(l1_nodes, audio_e)
         l0["children"] = l1_nodes
-        logger.info("Stage 4 done in %.1fs", time.time() - t0)
+        logger.info("Stage 5 done in %.1fs", time.time() - t0)
 
         return {"transcription": spans, "topics": {"topics": [l0]}}
 

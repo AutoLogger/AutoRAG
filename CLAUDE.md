@@ -29,22 +29,25 @@ returning `{transcription, topics}`. Pick by trade-off:
   instead of `start_s`/`end_s`). Single LLM call. Output dict shape is the
   reference contract for the other agents. Default model
   `qwen2.5:14b-instruct-q8_0`, `num_ctx=16384`.
-- `tiered_agent.py` — multi-pass L0/L1/L2 with an explicit "decide
-  subdivide" gate per L1 and an aggregate L0 root. ~N+M+3 LLM calls
-  (~10 for a 7-min clip). Output is `{"topics": [L0]}` — a single root
-  with `L0.children = [L1...]`. Best balance of quality and cost; the
-  decide-gate prevents the over-eager nesting that produces zero-duration
-  ghost L3s. Recommended starting point for new work. Default model
+- `tiered_agent.py` — multi-pass L0/L1/L2 with separated boundary
+  detection and summarization. Stages: L1 boundaries (1 call) → decide
+  subdivide on plain text (per long L1) → L2 boundaries (per yes-L1) →
+  per-node summarize for every L1 + L2 leaf (batched, plain text in /
+  `{title, summary}` out) → L0 aggregate. Total ~`2 + N1_long + N1_yes
+  + N1 + N2_total` LLM calls (~20 for a 7-min clip). Output is
+  `{"topics": [L0]}` — a single root with `L0.children = [L1...]`. The
+  boundaries-vs-summaries split lets each call have one focused job and
+  gives the K summary calls an identical prompt prefix for cache reuse.
+  Recommended starting point for new work. Default model
   `qwen2.5:14b-instruct-q8_0`.
 - `hierarchical_agent.py` — multi-pass divide-and-conquer pipeline (5
   stages, ~50–80 LLM calls, parallel-batched). Each call sees only its
   parent's transcript slice, so containment is structural. Use only when
   you need the full L3 nesting and have the parallelism budget.
 
-The CLI (`cli.py`) currently invokes `reimagined_agent`. Switching it to
-`tiered_agent` requires no code changes other than the import + the call
-site, because `cli.py`'s 3-level traversal maps L0 → category `l1`,
-L1 → `l2`, L2 → `l3` (the L0 root replaces what reimagined called L1).
+The CLI (`cli.py`) invokes `tiered_agent`. `cli.py`'s 3-level traversal
+maps L0 → category `l1`, L1 → `l2`, L2 → `l3` (the L0 root replaces
+what reimagined called L1).
 
 ### Ollama tuning notes (server-side)
 
