@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering  # type: ignore[import-untyped]
 from sklearn.metrics.pairwise import cosine_similarity  # type: ignore[import-untyped]
@@ -31,7 +29,8 @@ def cluster_embeddings(
         metric="cosine",
         linkage="average",
     )
-    return cast("np.ndarray", clust.fit_predict(safe).astype(int))
+    labels: np.ndarray = np.asarray(clust.fit_predict(safe), dtype=int)
+    return labels
 
 
 def build_edges(

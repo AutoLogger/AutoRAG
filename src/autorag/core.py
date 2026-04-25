@@ -6,6 +6,9 @@ from autorag.config import Settings, get_settings
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from autorag.schemas import Chunk
+
 from autorag.embed import Embedder
 from autorag.generate import Generator
 from autorag.ingest import chunk_document, load_documents
@@ -32,7 +35,7 @@ class AutoRAG:
 
     def ingest(self, paths: list[str | Path]) -> IngestResponse:
         docs = load_documents(paths)
-        all_chunks = []
+        all_chunks: list[Chunk] = []
         for doc in docs:
             all_chunks.extend(
                 chunk_document(

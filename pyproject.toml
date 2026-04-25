@@ -106,3 +106,17 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["autorag.whisper_runner"]
 disallow_any_generics = false
+
+[tool.pyright]
+pythonVersion = "3.12"
+include = ["src", "tests"]
+exclude = [".venv", "**/__pycache__", "**/.mypy_cache", "**/.ruff_cache"]
+typeCheckingMode = "strict"
+reportMissingTypeStubs = "none"
+reportUnusedParameter = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+# pydantic_sqlite has no stubs; we access its sqlite-utils handle (`_db`)
+# directly because the wrapper exposes no public reader for table iteration.
+reportPrivateUsage = "none"

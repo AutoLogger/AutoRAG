@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
-_CPU_PINNED = False  # set True after any CUDA failure for the process lifetime
-_DEVICE_LOG_EMITTED = False
-_RESOLVED_DEVICE: str | None = None
+_cpu_pinned = False  # set True after any CUDA failure for the process lifetime
+_device_log_emitted = False
+_resolved_device: str | None = None
 
 
 def _torch_cuda_available() -> bool:
@@ -42,8 +42,7 @@ def _torch_cuda_available() -> bool:
 
 def _device_preference() -> str:
     """Resolve the preferred device honoring `AUTOLOGGER_WHISPER_DEVICE`."""
-    global _CPU_PINNED
-    if _CPU_PINNED:
+    if _cpu_pinned:
         return "cpu"
     raw = os.environ.get("AUTOLOGGER_WHISPER_DEVICE", "auto").strip().lower()
     if raw == "cpu":
@@ -76,9 +75,8 @@ def _ensure_ffmpeg_on_path() -> None:
 
 def resolved_device() -> str:
     """Return the device most recently used (or preferred if nothing loaded yet)."""
-    global _RESOLVED_DEVICE
-    if _RESOLVED_DEVICE is not None:
-        return _RESOLVED_DEVICE
+    if _resolved_device is not None:
+        return _resolved_device
     return _device_preference()
 
 
@@ -94,36 +92,36 @@ def get_model(size: str, device_hint: str | None = None) -> Any:
     `device_hint` is advisory: if the process is already CPU-pinned because of
     an earlier GPU failure, the hint is ignored.
     """
-    global _DEVICE_LOG_EMITTED, _RESOLVED_DEVICE
+    global _device_log_emitted, _resolved_device
 
     _ensure_ffmpeg_on_path()
 
     device = (device_hint or "").strip().lower() or _device_preference()
-    if _CPU_PINNED:
+    if _cpu_pinned:
         device = "cpu"
     if device not in ("cuda", "cpu"):
         device = "cpu"
 
     key = (size, device)
     with _MODEL_LOCK:
-        if not _DEVICE_LOG_EMITTED:
+        if not _device_log_emitted:
             logger.info("Whisper device preference resolved to: %s", device)
-            _DEVICE_LOG_EMITTED = True
+            _device_log_emitted = True
         cached = _MODEL_CACHE.get(key)
         if cached is not None:
-            _RESOLVED_DEVICE = device
+            _resolved_device = device
             return cached
         model = _load_model_on(size, device)
         _MODEL_CACHE[key] = model
-        _RESOLVED_DEVICE = device
+        _resolved_device = device
         return model
 
 
 def _pin_cpu(reason: str) -> None:
-    global _CPU_PINNED
-    if not _CPU_PINNED:
+    global _cpu_pinned
+    if not _cpu_pinned:
         logger.warning("Pinning Whisper to CPU for remainder of process: %s", reason)
-    _CPU_PINNED = True
+    _cpu_pinned = True
 
 
 def _is_cuda_error(exc: BaseException) -> bool:
@@ -153,7 +151,7 @@ def transcribe_segment(
     try:
         result = model.transcribe(str(file_path), **kwargs)
     except Exception as exc:  # pragma: no cover - hardware-dependent
-        if _is_cuda_error(exc) and not _CPU_PINNED:
+        if _is_cuda_error(exc) and not _cpu_pinned:
             logger.warning(
                 "Whisper CUDA failure on %s (%s); reloading on CPU and retrying once.",
                 file_path,

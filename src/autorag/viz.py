@@ -87,8 +87,7 @@ def umap_3d(embeddings: list[list[float]]) -> npt.NDArray[np.float64]:
         n_neighbors=n_neighbors,
         random_state=42,
     )
-    coords: npt.NDArray[np.float64]
-    coords = reducer.fit_transform(emb)
+    coords: npt.NDArray[np.float64] = np.asarray(reducer.fit_transform(emb), dtype=np.float64)
     if coords.shape[1] < 3:
         coords = np.pad(coords, ((0, 0), (0, 3 - coords.shape[1])))
     return coords  # (N, 3)

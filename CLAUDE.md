@@ -33,6 +33,12 @@ These packages have no stubs — covered by mypy `ignore_missing_imports` overri
 These packages have no stubs — suppress with `# type: ignore[import-untyped]` at the import site:
 - `sklearn` (used in `viz.py` and `topic_cluster.py`)
 
+## Pylance / Pyright
+
+`.vscode/settings.json` enables Pylance with `typeCheckingMode: "strict"`. Because Pylance does not read `[tool.mypy]` overrides, the `[tool.pyright]` block in `pyproject.toml` mirrors them: `reportMissingTypeStubs = "none"` (matches the mypy `ignore_missing_imports` set above) and `reportPrivateUsage = "none"` (for accessing `pydantic_sqlite.DataBase._db` directly, which has no public reader). It also disables `reportUnknownArgumentType`/`VariableType`/`MemberType`, since mypy strict already catches the cases we care about and Pylance's strict mode flags `Any` propagation more aggressively than the codebase wants.
+
+If a new untyped third-party dep is added: add it to BOTH the mypy overrides and (implicitly) to the pyright config — `reportMissingTypeStubs = "none"` covers all unstubbed deps in one shot.
+
 ## Static Analysis Commands
 
 ```bash

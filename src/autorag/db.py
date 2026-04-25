@@ -194,8 +194,9 @@ class Database:
 
     def list_clips(self) -> list[dict[str, Any]]:
         try:
-            if "audio_clips" not in self.db._db.table_names():
+            inner = self.db._db  # pyright: ignore[reportPrivateUsage]
+            if "audio_clips" not in inner.table_names():
                 return []
-            return [dict(row) for row in self.db._db["audio_clips"].rows]
+            return [dict(row) for row in inner["audio_clips"].rows]
         except Exception:
             return []
