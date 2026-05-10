@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class Embedder:
     def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
         resolved_base = (
-            base_url or os.environ.get("AUTOLOGGER_OLLAMA_BASE_URL", "http://localhost:11434")
+            base_url or os.environ.get("AUTORAG_OLLAMA_BASE_URL", "http://localhost:11434")
         ).rstrip("/")
         resolved_model = model or os.environ.get("AUTOLOGGER_EMBED_MODEL", "nomic-embed-text")
         self.base_url = resolved_base

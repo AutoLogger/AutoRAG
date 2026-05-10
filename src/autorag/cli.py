@@ -15,8 +15,8 @@ from autorag.embed import Embedder
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from autorag.agent import TopicDict, TopicTree, WordSpan
     from autorag.db import Database
-    from autorag.tiered_agent import TopicDict, TopicTree, WordSpan
 
 app = typer.Typer(help="AutoRAG — automated retrieval-augmented generation.")
 
@@ -168,9 +168,8 @@ def _transcribe(
 ) -> tuple[list[str], dict[str, Any], dict[Any, Any] | None, dict[str, float]]:
     """Transcribe an audio file and output topics as a JSON list."""
     from autorag import whisper_runner
+    from autorag.agent import transcribe as run_agent
     from autorag.db import Database
-    from autorag.providers import OLLAMA_BASE_URL
-    from autorag.tiered_agent import transcribe as run_tiered
 
     if not file.is_file():
         typer.echo(f"Error: {file} is not a file.", err=True)
@@ -195,12 +194,11 @@ def _transcribe(
     import time as _time
 
     t_agent = _time.perf_counter()
-    agent_out = run_tiered(
+    agent_out = run_agent(
         file,
         whisper_model=whisper_model,
         language=language or None,
         llm_model=llm_model,
-        ollama_base_url=OLLAMA_BASE_URL(),
     )
     agent_secs = _time.perf_counter() - t_agent
 

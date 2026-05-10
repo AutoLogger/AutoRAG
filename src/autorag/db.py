@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import mimetypes
 import uuid
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel
 from pydantic_sqlite import DataBase
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _TABLE = "audio_clips"
 
@@ -19,9 +20,7 @@ class AudioClip(BaseModel):
     title: str
     file_path: str
     created_at: str
-    audio_signature: str | None = None
     transcription: str | None = None
-    whisper_cache: str | None = None
     topics: str | None = None
     whisper_model: str | None = None
     provider: str | None = None
@@ -38,49 +37,6 @@ class Database:
             return cast("AudioClip", self.db.model_from_table(_TABLE, session_id))
         except KeyError:
             return None
-
-    # --- orchestrator duck-typed interface ---
-
-    def list_audio_segments(self, session_id: str) -> list[dict[str, Any]]:
-        row = self._row(session_id)
-        if not row:
-            return []
-        return [{"id": "0", "started_at_utc": row.created_at}]
-
-    def get_audio_segment_file(self, session_id: str, segment_id: str) -> tuple[Path, str] | None:
-        row = self._row(session_id)
-        if not row:
-            return None
-        path = Path(row.file_path)
-        mime = mimetypes.guess_type(str(path))[0] or "audio/webm"
-        return (path, mime)
-
-    def get_transcript(self, session_id: str) -> dict[str, Any] | None:
-        row = self._row(session_id)
-        if not row or not row.whisper_cache or not row.audio_signature:
-            return None
-        return {
-            "audio_signature": row.audio_signature,
-            "transcript_json": json.loads(row.whisper_cache),
-        }
-
-    def upsert_transcript(
-        self,
-        session_id: str,
-        *,
-        whisper_model: str,
-        language: str | None,
-        audio_signature: str,
-        transcript_json: dict[str, Any],
-        generated_at_utc: str,
-    ) -> None:
-        clip = self._row(session_id)
-        if clip is None:
-            return
-        clip.audio_signature = audio_signature
-        clip.whisper_cache = json.dumps(transcript_json)
-        clip.whisper_model = whisper_model
-        self.db.add(_TABLE, clip, pk="id")
 
     def add_analytics_event(
         self,
