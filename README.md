@@ -83,7 +83,7 @@ autorag transcribe SOURCE [OPTIONS]
 
   SOURCE                        Audio file path or YouTube URL
                                 (youtube.com / youtu.be / m.youtube.com / music.youtube.com)
-  --title            -t  TEXT   Clip title (defaults to filename stem or video id)
+  --title            -t  TEXT   Clip title (defaults to YouTube video title for URLs, else filename stem / video id)
   --whisper-model    -w  TEXT   Whisper model: tiny/base/small/medium/large  [default: base]
   --provider         -p  TEXT   LLM provider (ollama)  [default: ollama]
   --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
@@ -91,7 +91,7 @@ autorag transcribe SOURCE [OPTIONS]
   --db                   PATH  Override database path
 ```
 
-For local files, the same path always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires the `[youtube]` extra) and the session ID is seeded from the canonical `https://www.youtube.com/watch?v=<id>` URL — `youtu.be/X`, `m.youtube.com/watch?v=X`, and `www.youtube.com/watch?v=X` all collapse to the same row. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
+For local files, the same path always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires the `[youtube]` extra) and the session ID is seeded from the canonical `https://www.youtube.com/watch?v=<id>` URL — `youtu.be/X`, `m.youtube.com/watch?v=X`, and `www.youtube.com/watch?v=X` all collapse to the same row. The stored row's `title`, `created_at`, and `file_path` are populated from yt-dlp's info dict (video title, upload date as midnight UTC, canonical URL) instead of the now-deleted temp file. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
 
 Timing breakdown is printed to stderr after each run:
 

@@ -87,7 +87,6 @@ def transcribe(
     from autorag.audio_source import resolve_audio_input
 
     rag = AutoRAG()
-    resolved_title = title or _default_title_from(source)
 
     with resolve_audio_input(source) as src:
         t0 = time.perf_counter()
@@ -99,6 +98,8 @@ def transcribe(
         )
         agent_secs = time.perf_counter() - t0
 
+        resolved_title = title or src.title or _default_title_from(source)
+
         persisted = rag.persist_transcription(
             src.path,
             result,
@@ -108,6 +109,8 @@ def transcribe(
             whisper_model=whisper_model,
             db_path=db_override,
             source_url=src.source_url,
+            upload_date=src.upload_date,
+            duration_s=src.duration_s,
         )
     p_timings = persisted["timings"]
     timings: dict[str, float] = {

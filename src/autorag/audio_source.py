@@ -6,7 +6,7 @@ import urllib.parse
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from autorag.errors import _missing_extra
 
@@ -28,15 +28,22 @@ _YOUTUBE_HOSTS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class AudioSource:
-    """Resolved audio input plus its original-source identity, if any.
+    """Resolved audio input plus its original-source identity and metadata.
 
     ``path`` is the local file the rest of the pipeline reads. ``source_url``
     and ``video_id`` are populated only when the input was a YouTube URL.
+    The remaining fields surface yt-dlp's info dict (title, upload date,
+    duration, uploader) so downstream persistence can record human-readable
+    metadata instead of falling back to the temp filename / mtime.
     """
 
     path: Path
     source_url: str | None
     video_id: str | None
+    title: str | None = None
+    upload_date: str | None = None
+    duration_s: float | None = None
+    uploader: str | None = None
 
 
 def is_youtube_url(value: str) -> bool:
@@ -83,8 +90,17 @@ def resolve_audio_input(source: Path | str) -> Iterator[AudioSource]:
     """
     if isinstance(source, str) and is_youtube_url(source):
         with tempfile.TemporaryDirectory(prefix="autorag-yt-") as tmp:
-            path, video_id = _download_youtube_audio(source, Path(tmp))
-            yield AudioSource(path=path, source_url=source, video_id=video_id)
+            path, info = _download_youtube_audio(source, Path(tmp))
+            duration = info.get("duration")
+            yield AudioSource(
+                path=path,
+                source_url=source,
+                video_id=str(info["id"]),
+                title=(info.get("title") or None),
+                upload_date=(info.get("upload_date") or None),
+                duration_s=float(duration) if duration is not None else None,
+                uploader=(info.get("uploader") or info.get("channel") or None),
+            )
         return
 
     path = Path(source)
@@ -93,7 +109,7 @@ def resolve_audio_input(source: Path | str) -> Iterator[AudioSource]:
     yield AudioSource(path=path, source_url=None, video_id=None)
 
 
-def _download_youtube_audio(url: str, dest_dir: Path) -> tuple[Path, str]:
+def _download_youtube_audio(url: str, dest_dir: Path) -> tuple[Path, dict[str, Any]]:
     try:
         import yt_dlp
     except ModuleNotFoundError as exc:
@@ -110,9 +126,8 @@ def _download_youtube_audio(url: str, dest_dir: Path) -> tuple[Path, str]:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         out = Path(ydl.prepare_filename(info))
-        video_id = str(info.get("id") or "").strip()
     if not out.is_file():
         raise RuntimeError(f"yt-dlp did not produce expected file: {out}")
-    if not video_id:
+    if not str(info.get("id") or "").strip():
         raise RuntimeError(f"yt-dlp did not return a video id for: {url}")
-    return out, video_id
+    return out, info

@@ -132,6 +132,8 @@ class AutoRAG:
         whisper_model: str = "base",
         db_path: Path | None = None,
         source_url: str | None = None,
+        upload_date: str | None = None,
+        duration_s: float | None = None,
     ) -> dict[str, Any]:
         """Write a transcription + topic tree to SQLite (clip + words + events) and
         index topic-title embeddings into Chroma. Returns a dict with the stored
@@ -144,8 +146,16 @@ class AutoRAG:
         local copy of remote content (e.g. a yt-dlp download). When supplied,
         the clip's ``session_id`` is seeded from the canonical URL instead of
         the local path, so re-fetching the same URL replaces the existing
-        clip rather than creating a duplicate.
+        clip rather than creating a duplicate. ``file_path`` in the stored row
+        is also set to the canonical URL so it remains valid after the temp
+        download is gone.
+
+        ``upload_date`` (optional, ``"YYYYMMDD"`` from yt-dlp) anchors the
+        clip's ``created_at`` (and absolute event timestamps) to when the
+        video was published, instead of when the temp file was written.
+        ``duration_s`` is currently informational and not persisted.
         """
+        del duration_s  # informational; no schema column for it yet
         try:
             from autorag.audio_source import _canonical_youtube_url, is_youtube_url
             from autorag.chroma_store import ChromaStore, default_chroma_dir
@@ -164,21 +174,33 @@ class AutoRAG:
         resolved_db = (db_path or self.settings.db_path).expanduser()
         db = Database(resolved_db)
 
+        canonical_source_url: str | None = None
         if source_url is not None and is_youtube_url(source_url):
-            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, _canonical_youtube_url(source_url)))
+            canonical_source_url = _canonical_youtube_url(source_url)
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, canonical_source_url))
         elif source_url is not None:
+            canonical_source_url = source_url
             session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_url))
         else:
             session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+
         clip_title = title or path.stem
-        mtime = path.stat().st_mtime
-        created_at = datetime.fromtimestamp(mtime, tz=UTC).isoformat().replace("+00:00", "Z")
-        audio_start = datetime.fromtimestamp(mtime, tz=UTC)
+
+        if upload_date:
+            uploaded_at = datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=UTC)
+            created_at = uploaded_at.isoformat().replace("+00:00", "Z")
+            audio_start = uploaded_at
+        else:
+            mtime = path.stat().st_mtime
+            created_at = datetime.fromtimestamp(mtime, tz=UTC).isoformat().replace("+00:00", "Z")
+            audio_start = datetime.fromtimestamp(mtime, tz=UTC)
+
+        stored_file_path = canonical_source_url or str(path.resolve())
 
         db.create_clip(
             session_id,
             title=clip_title,
-            file_path=str(path.resolve()),
+            file_path=stored_file_path,
             created_at=created_at,
         )
 
