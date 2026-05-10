@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from fastapi import FastAPI
@@ -11,10 +12,19 @@ from autorag.schemas import (
     QueryRequest,
     QueryResponse,
 )
-from autorag.viz import router as viz_router
 
-app = FastAPI(title="AutoRAG", version="0.1.0")
-app.include_router(viz_router)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="AutoRAG", version="0.2.0")
+
+# Viz endpoints depend on the `[rag]` extra (umap, sklearn, chromadb).
+# `[server]` users without `[rag]` get the API minus /viz.
+try:
+    from autorag.viz import router as viz_router
+except ModuleNotFoundError as exc:
+    logger.info("viz endpoints disabled (install autorag[rag] to enable): %s", exc)
+else:
+    app.include_router(viz_router)
 
 
 @lru_cache(maxsize=1)

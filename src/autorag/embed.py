@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-import numpy as np
-from chromadb import Documents, EmbeddingFunction, Embeddings
 from langchain_ollama import OllamaEmbeddings
 
 if TYPE_CHECKING:
@@ -34,18 +32,3 @@ class Embedder:
         for c, v in zip(chunks, vectors, strict=True):
             c.embedding = v
         return chunks
-
-
-class EmbedderEmbeddingFunction(EmbeddingFunction[Documents]):
-    """Adapt :class:`Embedder` to Chroma's ``EmbeddingFunction`` protocol."""
-
-    def __init__(self, embedder: Embedder | None = None) -> None:
-        self._embedder = embedder or Embedder()
-
-    def __call__(self, input: Documents) -> Embeddings:
-        vectors = self._embedder.embed_texts(list(input))
-        return cast("Embeddings", [np.asarray(v, dtype=np.float32) for v in vectors])
-
-    @staticmethod
-    def name() -> str:
-        return "autorag-ollama-embedder"

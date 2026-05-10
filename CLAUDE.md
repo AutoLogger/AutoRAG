@@ -13,8 +13,23 @@ Always use `uv`, never `pip` directly:
 
 - `src/autorag/` — main package (src layout)
 - `tests/` — pytest tests
-- Entry point: `autorag` CLI (`src/autorag/cli.py`)
-- API server: `src/autorag/api.py`
+- **SDK entry point**: `from autorag import AutoRAG` (`src/autorag/core.py`)
+- CLI: `autorag` (`src/autorag/cli.py`) — thin wrapper over `AutoRAG`
+- API server: `src/autorag/api.py` — also wraps `AutoRAG`
+
+### SDK facade (`core.py`)
+
+`AutoRAG` is the single public class. Flat methods, lazy imports for heavy deps:
+
+| Method                   | Extras needed     | Purpose                                       |
+|--------------------------|-------------------|-----------------------------------------------|
+| `transcribe(file, ...)`  | `[audio,diarize]` | Whisper + LLM topic tree → `TranscriptionResult` |
+| `build_agent(**kwargs)`  | `[audio,diarize]` | Returns the LangChain `Runnable` directly     |
+| `persist_transcription(file, result, ...)` | `[rag]` | Writes clip + words + events to SQLite, indexes topic embeddings in Chroma |
+| `ingest(paths)`          | base              | Document RAG: load → chunk → embed → store    |
+| `query(question, ...)`   | base              | Retrieve + generate over ingested corpus      |
+
+Each audio/RAG method does `from autorag.X import ...` *inside the method body* and re-raises `ModuleNotFoundError` as `MissingExtraError` with a friendly extras hint. **Do not move these imports to module-top** — base install (`pip install autorag`) must boot without `chromadb`/`torch`/`whisper`/`pyannote` installed. The CI `test-base` job enforces this.
 
 ### Audio → transcript + topics agent
 
@@ -22,7 +37,8 @@ Always use `uv`, never `pip` directly:
 `transcribe(file, **kwargs) -> TranscriptionResult` and `build_agent(**kwargs)`,
 returning `{transcription, topics}` where `topics = {"topics": [L0]}` and `L0`
 is a root node whose `children` are the L1 topics (each with optional `L2`
-`children`).
+`children`). Most callers should use `AutoRAG.transcribe()` instead of importing
+this module directly — the facade handles the lazy-import / extras-error story.
 
 Multi-pass L0/L1/L2 with boundary detection separated from summarization.
 Stages: L1 boundaries (1 call) → decide subdivide on plain text (per long L1) →
@@ -47,8 +63,10 @@ emits `[Speaker N]` headers above per-word timestamp lines; the per-node
 summary input emits `Speaker N: <words>` per turn so the LLM sees explicit
 turn-taking.
 
-The CLI (`cli.py`) calls `agent.transcribe()`. Its 3-level traversal maps
-the agent's L0 children → category `l1`, L1 children → `l2`, L2 children → `l3`.
+The CLI (`cli.py`) calls `AutoRAG.transcribe()` then `AutoRAG.persist_transcription()`.
+Persistence helpers (`collapse_lone_children`, `iter_topics_flat`, `topics_to_events`)
+live in `src/autorag/persistence.py`. The 3-level traversal maps the agent's L0
+children → category `l1`, L1 children → `l2`, L2 children → `l3`.
 
 ### Ollama tuning notes (server-side)
 
@@ -78,8 +96,25 @@ Other settings:
 
 - Every module begins with `from __future__ import annotations`.
 - Pydantic v2 `BaseModel` for API schemas; `SettingsConfigDict` for config.
-- `TypedDict` in `agent.py` for `WordSpan`, `TopicDict`, `TopicTree`, `TranscriptionResult` — extend this pattern for new typed dicts.
+- `TypedDict` lives in `src/autorag/types.py` (dep-free) so SDK consumers can reference `WordSpan`, `TopicDict`, `TopicTree`, `TranscriptionResult` without importing langchain/whisper. New public typed-dicts go here, not in `agent.py`.
 - `numpy.typing.NDArray[np.float64]` for numpy array return types (see `viz.umap_3d`).
+- **Heavy deps stay lazy.** Base install (`pip install autorag`) only has typer + pydantic + langchain-{core,ollama}. Anything that imports `chromadb` / `torch` / `whisper` / `pyannote` / `umap` / `sklearn` / `pydantic_sqlite` belongs behind a method-body `import` in `core.py` (or the appropriate extras-gated module). When adding a new public method, decide which extra it needs and follow the existing `MissingExtraError` pattern.
+
+### Packaging (`pyproject.toml`)
+
+| Extra      | Modules that import it                                  | Adds                                  |
+|------------|---------------------------------------------------------|---------------------------------------|
+| `audio`    | `whisper_runner.py`, `agent.py` (whisper)               | openai-whisper, torch, imageio-ffmpeg |
+| `diarize`  | `diarize.py`                                            | pyannote.audio, huggingface-hub       |
+| `rag`      | `chroma_store.py`, `db.py`, `viz.py`, `topic_cluster.py`| chromadb, umap-learn, scikit-learn, numpy, pydantic_sqlite |
+| `server`   | `api.py` (FastAPI app)                                  | fastapi, uvicorn[standard]            |
+| `all`      | —                                                       | union of the above                     |
+
+Distribution is **GitHub-hosted, not PyPI**. Consumers install with
+`pip install "autorag[...] @ git+https://github.com/AutoLogger/AutoRAG@v0.x.0"`.
+Releases are made by bumping `__version__` in `src/autorag/__init__.py` and
+`version` in `pyproject.toml`, running `uv lock`, committing, then
+`git tag v0.x.0 && git push --tags`.
 
 ## Third-Party Stubs
 
@@ -108,9 +143,10 @@ uv run pytest
 
 ## CI Pipeline
 
-`.github/workflows/ci.yml` runs on every push and PR to `main`. Two parallel jobs:
+`.github/workflows/ci.yml` runs on every push and PR to `main`. Three parallel jobs:
 
-- **Lint & Type Check** — `ruff check`, `ruff format --check`, `mypy`
-- **Tests** — `pytest -v`
+- **Lint & Type Check** — `ruff check`, `ruff format --check`, `mypy` (installs `--all-extras` so mypy can see torch/chromadb/etc.)
+- **Tests (all extras)** — `pytest -v` against the full dependency stack
+- **SDK base install (no extras)** — `uv sync --frozen --no-dev` then asserts `from autorag import AutoRAG` boots and the SDK methods are callable. **This is the regression guard for the lazy-import contract** — if anyone re-introduces a `chromadb`/`torch`/`whisper`/`pyannote` import at module top in `core.py` / `embed.py` / `__init__.py` / `store.py`, this job fails.
 
 The workflow uses `uv sync --frozen` (fails if `uv.lock` is out of sync with `pyproject.toml`). If you add or change dependencies, run `uv lock` locally before pushing to keep the lock file current.

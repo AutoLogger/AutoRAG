@@ -26,7 +26,7 @@ import os
 import time
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
@@ -34,34 +34,9 @@ from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
 from autorag import diarize, whisper_runner
+from autorag.types import TopicDict, TopicTree, TranscriptionResult, WordSpan
 
 logger = logging.getLogger(__name__)
-
-
-class WordSpan(TypedDict, total=False):
-    w: str
-    s: float
-    e: float
-    abs_s: float
-    segment_id: str
-    speaker: str
-
-
-class TopicDict(TypedDict, total=False):
-    title: str
-    summary: str
-    s: float
-    e: float
-    children: list[TopicDict]
-
-
-class TopicTree(TypedDict):
-    topics: list[TopicDict]
-
-
-class TranscriptionResult(TypedDict):
-    transcription: list[WordSpan]
-    topics: TopicTree
 
 
 class _Boundary(BaseModel):

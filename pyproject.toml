@@ -4,28 +4,45 @@ build-backend = "uv_build"
 
 [project]
 name = "autorag"
-version = "0.1.0"
-description = "Automated Retrieval-Augmented Generation toolkit with CLI and API."
+version = "0.2.0"
+description = "Audio→topics agent + document RAG toolkit. Importable SDK + CLI + HTTP API."
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = ">=3.12,<3.14"
 license = { file = "LICENSE" }
 authors = [{ name = "Kalen Cantrell" }]
 dependencies = [
     "typer>=0.12",
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
-    "imageio-ffmpeg>=0.6.0",
-    "pandas>=3.0.2",
+    "langchain-core>=0.3",
+    "langchain-ollama>=0.3",
+]
+
+[project.optional-dependencies]
+audio = [
     "openai-whisper>=1.0.0",
     "torch>=2.0",
-    "pydantic_sqlite>=0.5.0",
-    "umap-learn>=0.5",
-    "chromadb>=1.5.8",
-    "langchain-ollama>=0.3",
+    "imageio-ffmpeg>=0.6.0",
+]
+# `[diarize]` builds on `[audio]`: pyannote needs the same torch + ffmpeg stack.
+# Install both together: `pip install 'autorag[audio,diarize]'`.
+diarize = [
     "pyannote.audio>=3.1",
     "huggingface-hub>=0.20",
+]
+rag = [
+    "chromadb>=1.5.8",
+    "umap-learn>=0.5",
+    "scikit-learn>=1.4",
+    "numpy>=1.24",
+    "pydantic_sqlite>=0.5.0",
+]
+server = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+all = [
+    "autorag[audio,diarize,rag,server]",
 ]
 
 [project.scripts]

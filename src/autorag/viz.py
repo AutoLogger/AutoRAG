@@ -13,10 +13,10 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from autorag.chroma_store import ChromaStore, default_chroma_dir
 from autorag.config import get_settings
 from autorag.db import Database
 from autorag.embed import Embedder
-from autorag.store import ChromaStore, default_chroma_dir
 from autorag.topic_cluster import build_edges, cluster_embeddings
 
 router = APIRouter()

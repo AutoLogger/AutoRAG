@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from autorag.embed import Embedder, EmbedderEmbeddingFunction
-from autorag.store import ChromaStore
+from autorag.chroma_store import ChromaStore, EmbedderEmbeddingFunction
+from autorag.embed import Embedder
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -7,14 +7,58 @@ Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic
 ## Quickstart
 
 ```bash
-# Install (Whisper + Torch are core deps)
-uv sync                        # installs core deps from the lock file
+# Install full stack (audio + diarization + RAG + server)
+uv sync --all-extras
 
 # Transcribe using Ollama (no API key needed)
 autorag transcribe session.webm
 ```
 
 Output is a JSON list of topics printed to stdout. Timing info goes to stderr. The database is written to `~/.autorag/autorag.db` by default.
+
+## Install as a library
+
+AutoRAG is also a pip-installable SDK. Install from a tagged release on GitHub:
+
+```bash
+# Audio → topics agent only (Whisper + diarization)
+pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
+
+# Full stack (also installs Chroma + UMAP + FastAPI)
+pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
+```
+
+```python
+from autorag import AutoRAG
+
+rag = AutoRAG()
+result = rag.transcribe("meeting.wav")
+print(result["topics"])           # hierarchical topic tree
+print(result["transcription"])    # word-level spans with speaker labels
+
+# Optional: persist to SQLite + index topic embeddings (requires [rag] extra)
+rag.persist_transcription("meeting.wav", result, title="Weekly sync")
+```
+
+### Extras
+
+| Extra      | Adds                                         | Use when you want…                                  |
+|------------|----------------------------------------------|------------------------------------------------------|
+| `audio`    | openai-whisper, torch, imageio-ffmpeg        | …to call `rag.transcribe()` / `rag.build_agent()` |
+| `diarize`  | pyannote.audio, huggingface-hub              | …speaker labels (combine with `audio`)               |
+| `rag`      | chromadb, umap-learn, scikit-learn, pydantic_sqlite, numpy | …`rag.persist_transcription()`, viz, or document RAG |
+| `server`   | fastapi, uvicorn[standard]                   | …`autorag serve` / the HTTP API                       |
+| `all`      | everything above                             | …the full local-dev stack                             |
+
+`[diarize]` is meant to ride on top of `[audio]` — pyannote needs the same torch + ffmpeg stack. Install both together: `pip install 'autorag[audio,diarize]'`.
+
+### Releasing a new version
+
+1. Bump `__version__` in `src/autorag/__init__.py` and `version` in `pyproject.toml`.
+2. `uv lock` to refresh, commit.
+3. `git tag v0.x.0 && git push --tags`.
+
+Consumers then pin to the tag: `pip install "autorag[...] @ git+https://github.com/AutoLogger/AutoRAG@v0.x.0"`.
 
 ## CLI
 
@@ -107,7 +151,7 @@ Ollama is invoked via [LangChain (`langchain-ollama`)](https://pypi.org/project/
 | `AUTOLOGGER_EMBED_MODEL`    | `nomic-embed-text`       | Ollama model for topic title embeddings                                                                  |
 | `HF_TOKEN`                  | *(unset)*                | HuggingFace token for `pyannote/speaker-diarization-3.1`. Without it, every word is labeled speaker `"0"`. |
 
-Whisper and PyTorch are **core** dependencies and are always installed.
+Whisper and PyTorch ship with the `[audio]` extra; pyannote with `[diarize]`. See **Install as a library** for the extras matrix.
 
 ## Database schema
 
