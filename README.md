@@ -26,35 +26,27 @@ autorag transcribe FILE [OPTIONS]
   --title            -t  TEXT   Clip title (defaults to filename stem)
   --whisper-model    -w  TEXT   Whisper model: tiny/base/small/medium/large  [default: base]
   --provider         -p  TEXT   LLM provider (ollama)  [default: ollama]
-  --llm-model        -m  TEXT   LLM model name (uses provider default if omitted)
+  --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
   --language         -l  TEXT   Whisper language code (auto-detect if empty)
-  --force-retranscribe    FLAG  Re-run Whisper even if cached
   --db                   PATH  Override database path
 ```
 
-The same file always maps to the same session ID (UUID5 of its resolved path), so Whisper output is cached across runs. Re-running without `--force-retranscribe` skips Whisper and only re-runs the LLM topic extraction. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
+The same file always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
 
 Timing breakdown is printed to stderr after each run:
 
 ```
 === Transcription Timing Breakdown ===
-  db_enumerate           0.003s
-  audio_signature        0.012s
-  cache_lookup           0.001s
-  whisper_model_load     1.843s
-  whisper_transcription  8.201s
-  db_upsert_transcript   0.004s
-  word_flatten           0.002s
-  llm_summarize         12.114s
-  topic_collapse         0.000s
-  db_fanout              0.005s
-  cli_store_words        0.003s
-  cli_finalize           0.004s
-  cli_embed              0.231s
-  ─────────────────────────────
-  TOTAL                 22.423s
+  agent             21.842s
+  cli_store_words    0.003s
+  cli_finalize       0.005s
+  cli_embed          0.231s
+  ───────────────────────────
+  TOTAL             22.081s
   device: cuda
 ```
+
+The `agent` stage covers Whisper transcription plus all five LLM passes (L1 boundaries, subdivide decisions, L2 boundaries, per-node summarization, L0 aggregation).
 
 ### `autorag ingest`
 
@@ -97,31 +89,25 @@ Start the server with `autorag serve`, then:
 
 Ollama is the only supported provider. It runs locally — no API key required.
 
-| Provider | Env var                      | Default model | Notes         |
-|----------|------------------------------|---------------|---------------|
-| ollama   | *(none — local)*             | llama3.1:8b   | *(built-in)*  |
+| Provider | Env var                      | Default model              | Notes         |
+|----------|------------------------------|----------------------------|---------------|
+| ollama   | *(none — local)*             | qwen2.5:14b-instruct-q8_0  | *(built-in)*  |
 
 Ollama is invoked via [LangChain (`langchain-ollama`)](https://pypi.org/project/langchain-ollama/). The provider constructs messages with `SystemMessage`/`HumanMessage` and calls `ChatOllama.with_structured_output(schema, method="json_schema")` to enforce the topic-tree JSON schema. Embeddings are generated with `OllamaEmbeddings.embed_documents()`.
 
 ## Environment variables
 
-### Transcription / providers (`AUTOLOGGER_` prefix)
-
-| Variable                     | Default                  | Description                             |
-|------------------------------|--------------------------|-----------------------------------------|
-| `AUTOLOGGER_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL                       |
-| `AUTOLOGGER_WHISPER_DEVICE`  | `auto`                   | `auto`, `cpu`, or `cuda`                |
-| `AUTOLOGGER_EMBED_MODEL`     | `nomic-embed-text`       | Ollama model for topic title embeddings |
-
-### RAG / general (`AUTORAG_` prefix)
-
-| Variable            | Default                 | Description                          |
-|---------------------|-------------------------|--------------------------------------|
-| `AUTORAG_DB_PATH`   | `~/.autorag/autorag.db` | SQLite database path                 |
-| `AUTORAG_MODEL`     | `claude-sonnet-4-6`     | LLM used by the RAG generator        |
-| `AUTORAG_CHUNK_SIZE`    | `1000`              | Characters per chunk when ingesting  |
-| `AUTORAG_CHUNK_OVERLAP` | `200`               | Overlap between consecutive chunks  |
-| `AUTORAG_TOP_K`         | `5`                 | Default number of chunks to retrieve |
+| Variable                    | Default                  | Description                                                                                              |
+|-----------------------------|--------------------------|----------------------------------------------------------------------------------------------------------|
+| `AUTORAG_OLLAMA_BASE_URL`   | `http://localhost:11434` | Ollama server URL (used by both the agent and the embedder)                                              |
+| `AUTORAG_DB_PATH`           | `~/.autorag/autorag.db`  | SQLite database path                                                                                     |
+| `AUTORAG_MODEL`             | `claude-sonnet-4-6`      | LLM used by the RAG generator                                                                            |
+| `AUTORAG_CHUNK_SIZE`        | `1000`                   | Characters per chunk when ingesting                                                                      |
+| `AUTORAG_CHUNK_OVERLAP`     | `200`                    | Overlap between consecutive chunks                                                                       |
+| `AUTORAG_TOP_K`             | `5`                      | Default number of chunks to retrieve                                                                     |
+| `AUTOLOGGER_WHISPER_DEVICE` | `auto`                   | `auto`, `cpu`, or `cuda` (Whisper + pyannote)                                                            |
+| `AUTOLOGGER_EMBED_MODEL`    | `nomic-embed-text`       | Ollama model for topic title embeddings                                                                  |
+| `HF_TOKEN`                  | *(unset)*                | HuggingFace token for `pyannote/speaker-diarization-3.1`. Without it, every word is labeled speaker `"0"`. |
 
 Whisper and PyTorch are **core** dependencies and are always installed.
 
@@ -135,13 +121,11 @@ CREATE TABLE audio_clips (
     title           TEXT NOT NULL,      -- user-supplied or filename stem
     file_path       TEXT NOT NULL,
     created_at      TEXT NOT NULL,      -- ISO 8601 UTC (file mtime)
-    audio_signature TEXT,               -- SHA-256 of audio content; cache key for Whisper
     transcription   TEXT,               -- JSON: word-level transcript (see below)
-    whisper_cache   TEXT,               -- raw Whisper output; internal use only
     topics          TEXT,               -- JSON: topic list (see below)
     whisper_model   TEXT,               -- e.g. "base"
     provider        TEXT,               -- e.g. "ollama"
-    llm_model       TEXT                -- e.g. "claude-sonnet-4-6"
+    llm_model       TEXT                -- e.g. "qwen2.5:14b-instruct-q8_0"
 );
 ```
 
@@ -153,17 +137,18 @@ Word-level timestamps from Whisper, flattened to absolute offsets from audio sta
 
 ```json
 [
-  {"w": " Hello", "s": 0.0, "e": 0.4, "abs_s": 0.0},
-  {"w": " world", "s": 0.4, "e": 0.8, "abs_s": 0.4}
+  {"w": " Hello", "s": 0.0, "e": 0.4, "abs_s": 0.0, "speaker": "0"},
+  {"w": " world", "s": 0.4, "e": 0.8, "abs_s": 0.4, "speaker": "1"}
 ]
 ```
 
-| Field   | Description                                         |
-|---------|-----------------------------------------------------|
-| `w`     | Word token (may include leading space)              |
-| `s`     | Segment-relative start time (seconds)               |
-| `e`     | Segment-relative end time (seconds)                 |
-| `abs_s` | Absolute start offset from audio start (seconds)    |
+| Field     | Description                                                                                            |
+|-----------|--------------------------------------------------------------------------------------------------------|
+| `w`       | Word token (may include leading space)                                                                 |
+| `s`       | Segment-relative start time (seconds)                                                                  |
+| `e`       | Segment-relative end time (seconds)                                                                    |
+| `abs_s`   | Absolute start offset from audio start (seconds)                                                       |
+| `speaker` | Speaker label `"0"`, `"1"`, … normalized in first-appearance order. `"0"` when diarization is disabled. |
 
 ### `topics` column
 
@@ -254,16 +239,16 @@ GET /viz/search?q=gradient+descent&top_k=5
 autorag transcribe FILE
   │
   ├─ db.create_clip()              Register file in SQLite
-  ├─ orchestrator.run_session_transcription()
-  │    ├─ db.list_audio_segments() → db.get_audio_segment_file()
-  │    ├─ signatures.compute_audio_signature()  SHA-256 cache key
-  │    ├─ db.get_transcript()      Cache hit?
-  │    │    no → whisper_runner.get_model() → .transcribe_segment()
-  │    │         db.upsert_transcript()
-  │    ├─ providers.get_provider().summarize()  LLM call → TopicTree
-  │    ├─ _collapse_lone_children()             Enforce ≥2 siblings
-  │    └─ db.add_analytics_event() × N          Fanout topics
+  ├─ agent.transcribe()            Whisper + 5-stage LLM pipeline
+  │    ├─ whisper_runner.get_model() → .transcribe_segment()
+  │    ├─ Stage 2: L1 boundaries          (1 LLM call)
+  │    ├─ Stage 3a: decide subdivide      (N LLM calls, batched)
+  │    ├─ Stage 3b: L2 boundaries         (M LLM calls, batched)
+  │    ├─ Stage 4: per-node summaries     (K LLM calls, batched)
+  │    └─ Stage 5: L0 aggregate           (1 LLM call)
+  ├─ _collapse_lone_children()     Drop single-child chains
   ├─ db.store_transcription()      Persist word spans
+  ├─ _topics_to_events() → db.add_analytics_event() × N
   ├─ db.finalize_topics()          Compute durations, persist topics JSON
   └─ Embedder().embed_texts()      Ollama embed → ChromaStore.add_topic_embeddings()
 
