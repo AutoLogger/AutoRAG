@@ -41,8 +41,11 @@ server = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
 ]
+youtube = [
+    "yt-dlp>=2024.0",
+]
 all = [
-    "autorag[audio,diarize,rag,server]",
+    "autorag[audio,diarize,rag,server,youtube]",
 ]
 
 [project.scripts]
@@ -122,6 +125,8 @@ module = [
     "chromadb.*",
     "pyannote",
     "pyannote.*",
+    "yt_dlp",
+    "yt_dlp.*",
 ]
 ignore_missing_imports = true
 

@@ -23,13 +23,13 @@ Always use `uv`, never `pip` directly:
 
 | Method                   | Extras needed     | Purpose                                       |
 |--------------------------|-------------------|-----------------------------------------------|
-| `transcribe(file, ...)`  | `[audio,diarize]` | Whisper + LLM topic tree → `TranscriptionResult` |
+| `transcribe(file, ...)`  | `[audio,diarize]` (+ `[youtube]` for URLs) | Whisper + LLM topic tree → `TranscriptionResult`. `file` is a local path **or** a YouTube URL (downloaded to a temp `.webm` via `autorag.audio_source.resolve_audio_input`) |
 | `build_agent(**kwargs)`  | `[audio,diarize]` | Returns the LangChain `Runnable` directly     |
 | `persist_transcription(file, result, ...)` | `[rag]` | Writes clip + words + events to SQLite, indexes topic embeddings in Chroma |
 | `ingest(paths)`          | base              | Document RAG: load → chunk → embed → store    |
 | `query(question, ...)`   | base              | Retrieve + generate over ingested corpus      |
 
-Each audio/RAG method does `from autorag.X import ...` *inside the method body* and re-raises `ModuleNotFoundError` as `MissingExtraError` with a friendly extras hint. **Do not move these imports to module-top** — base install (`pip install autorag`) must boot without `chromadb`/`torch`/`whisper`/`pyannote` installed. The CI `test-base` job enforces this.
+`MissingExtraError` and `_missing_extra` live in `src/autorag/errors.py` (`core.py` re-exports `MissingExtraError` for backwards compat). Each audio/RAG method does `from autorag.X import ...` *inside the method body* and re-raises `ModuleNotFoundError` as `MissingExtraError` with a friendly extras hint. **Do not move these imports to module-top** — base install (`pip install autorag`) must boot without `chromadb`/`torch`/`whisper`/`pyannote`/`yt_dlp` installed. The CI `test-base` job enforces this.
 
 ### Audio → transcript + topics agent
 
@@ -67,6 +67,22 @@ The CLI (`cli.py`) calls `AutoRAG.transcribe()` then `AutoRAG.persist_transcript
 Persistence helpers (`collapse_lone_children`, `iter_topics_flat`, `topics_to_events`)
 live in `src/autorag/persistence.py`. The 3-level traversal maps the agent's L0
 children → category `l1`, L1 children → `l2`, L2 children → `l3`.
+
+### YouTube URL input (`audio_source.py`)
+
+`src/autorag/audio_source.py` provides URL detection (`is_youtube_url`,
+host-allowlisted via `urllib.parse`) and a `resolve_audio_input(source)`
+context manager that yields a local `Path`. For YouTube URLs it downloads
+the best audio stream into a `tempfile.TemporaryDirectory(prefix="autorag-yt-")`
+via `yt_dlp` (lazy-imported inside the helper, gated by the `[youtube]`
+extra; raises `MissingExtraError("youtube", ...)` when missing). For
+non-URL inputs it just verifies the path exists and yields it through.
+
+Both `core.AutoRAG.transcribe()` and the CLI wrap their work in
+`resolve_audio_input`. The CLI must own the temp lifetime itself because
+it calls both `transcribe` and `persist_transcription` on the same path —
+inner `core.transcribe`'s wrapper is a no-op pass-through for an
+already-local Path, so the double-wrap is safe and idempotent.
 
 ### Ollama tuning notes (server-side)
 
@@ -106,6 +122,7 @@ Other settings:
 |------------|---------------------------------------------------------|---------------------------------------|
 | `audio`    | `whisper_runner.py`, `agent.py` (whisper)               | openai-whisper, torch, imageio-ffmpeg |
 | `diarize`  | `diarize.py`                                            | pyannote.audio, huggingface-hub       |
+| `youtube`  | `audio_source.py` (lazy in `_download_youtube_audio`)   | yt-dlp                                |
 | `rag`      | `chroma_store.py`, `db.py`, `viz.py`, `topic_cluster.py`| chromadb, umap-learn, scikit-learn, numpy, pydantic_sqlite |
 | `server`   | `api.py` (FastAPI app)                                  | fastapi, uvicorn[standard]            |
 | `all`      | —                                                       | union of the above                     |
@@ -119,7 +136,7 @@ Releases are made by bumping `__version__` in `src/autorag/__init__.py` and
 ## Third-Party Stubs
 
 These packages have no stubs — covered by mypy `ignore_missing_imports` overrides:
-- `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`, `chromadb`, `pyannote`
+- `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`, `chromadb`, `pyannote`, `yt_dlp`
 
 `langchain-ollama` and `langchain-core` ship inline types and need no mypy overrides.
 
@@ -147,6 +164,6 @@ uv run pytest
 
 - **Lint & Type Check** — `ruff check`, `ruff format --check`, `mypy` (installs `--all-extras` so mypy can see torch/chromadb/etc.)
 - **Tests (all extras)** — `pytest -v` against the full dependency stack
-- **SDK base install (no extras)** — `uv sync --frozen --no-dev` then asserts `from autorag import AutoRAG` boots and the SDK methods are callable. **This is the regression guard for the lazy-import contract** — if anyone re-introduces a `chromadb`/`torch`/`whisper`/`pyannote` import at module top in `core.py` / `embed.py` / `__init__.py` / `store.py`, this job fails.
+- **SDK base install (no extras)** — `uv sync --frozen --no-dev` then asserts `from autorag import AutoRAG` boots and the SDK methods are callable. **This is the regression guard for the lazy-import contract** — if anyone re-introduces a `chromadb`/`torch`/`whisper`/`pyannote`/`yt_dlp` import at module top in `core.py` / `embed.py` / `__init__.py` / `store.py` / `audio_source.py`, this job fails.
 
 The workflow uses `uv sync --frozen` (fails if `uv.lock` is out of sync with `pyproject.toml`). If you add or change dependencies, run `uv lock` locally before pushing to keep the lock file current.

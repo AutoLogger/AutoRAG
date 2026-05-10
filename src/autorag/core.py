@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from autorag.config import Settings, get_settings
 from autorag.embed import Embedder
+from autorag.errors import MissingExtraError, _missing_extra
 from autorag.generate import Generator
 from autorag.ingest import chunk_document, load_documents
 from autorag.retrieve import Retriever
@@ -24,16 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class MissingExtraError(ImportError):
-    """Raised when an `AutoRAG` method needs an optional extra that isn't installed."""
-
-
-def _missing_extra(extras: str, original: BaseException) -> MissingExtraError:
-    return MissingExtraError(
-        f"This feature requires `pip install 'autorag[{extras}]'`. "
-        f"Underlying import error: {original}"
-    )
+__all__ = ["AutoRAG", "MissingExtraError"]
 
 
 class AutoRAG:
@@ -91,22 +83,31 @@ class AutoRAG:
         llm_model: str = "qwen2.5:14b-instruct-q8_0",
         language: str | None = None,
     ) -> TranscriptionResult:
-        """Run Whisper + LLM topic extraction on an audio file.
+        """Run Whisper + LLM topic extraction on an audio file or YouTube URL.
 
-        Requires ``pip install 'autorag[audio,diarize]'``. Returns the raw
+        ``file`` is either a local audio file path or a YouTube URL
+        (``youtube.com``, ``youtu.be``, ``m.youtube.com``,
+        ``music.youtube.com``). YouTube URLs are downloaded to a temporary
+        ``.webm`` for the duration of the call.
+
+        Requires ``pip install 'autorag[audio,diarize]'`` for transcription,
+        plus ``[youtube]`` when passing a URL. Returns the raw
         ``{transcription, topics}`` dict. Use :meth:`persist_transcription`
         to write to SQLite + Chroma (separate ``[rag]`` extra).
         """
         try:
             from autorag.agent import transcribe as _agent_transcribe
+            from autorag.audio_source import resolve_audio_input
         except ModuleNotFoundError as exc:
             raise _missing_extra("audio,diarize", exc) from exc
-        return _agent_transcribe(
-            file,
-            whisper_model=whisper_model,
-            llm_model=llm_model,
-            language=language,
-        )
+
+        with resolve_audio_input(file) as audio_path:
+            return _agent_transcribe(
+                audio_path,
+                whisper_model=whisper_model,
+                llm_model=llm_model,
+                language=language,
+            )
 
     def build_agent(self, **kwargs: Any) -> Runnable[Path | str, TranscriptionResult]:
         """Return the LangChain :class:`Runnable` for batched / streaming use.

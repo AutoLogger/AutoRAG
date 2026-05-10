@@ -7,11 +7,14 @@ Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic
 ## Quickstart
 
 ```bash
-# Install full stack (audio + diarization + RAG + server)
+# Install full stack (audio + diarization + RAG + server + YouTube download)
 uv sync --all-extras
 
-# Transcribe using Ollama (no API key needed)
+# Transcribe a local audio file using Ollama (no API key needed)
 autorag transcribe session.webm
+
+# …or a YouTube URL — yt-dlp downloads the audio to a temp .webm first
+autorag transcribe https://www.youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
 Output is a JSON list of topics printed to stdout. Timing info goes to stderr. The database is written to `~/.autorag/autorag.db` by default.
@@ -24,6 +27,9 @@ AutoRAG is also a pip-installable SDK. Install from a tagged release on GitHub:
 # Audio → topics agent only (Whisper + diarization)
 pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
 
+# Add YouTube URL support (yt-dlp)
+pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
+
 # Full stack (also installs Chroma + UMAP + FastAPI)
 pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
 ```
@@ -32,7 +38,14 @@ pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
 from autorag import AutoRAG
 
 rag = AutoRAG()
+
+# Local file
 result = rag.transcribe("meeting.wav")
+
+# Or a YouTube URL — downloaded to a temp .webm for the call's duration.
+# Requires the [youtube] extra.
+result = rag.transcribe("https://youtu.be/dQw4w9WgXcQ")
+
 print(result["topics"])           # hierarchical topic tree
 print(result["transcription"])    # word-level spans with speaker labels
 
@@ -46,6 +59,7 @@ rag.persist_transcription("meeting.wav", result, title="Weekly sync")
 |------------|----------------------------------------------|------------------------------------------------------|
 | `audio`    | openai-whisper, torch, imageio-ffmpeg        | …to call `rag.transcribe()` / `rag.build_agent()` |
 | `diarize`  | pyannote.audio, huggingface-hub              | …speaker labels (combine with `audio`)               |
+| `youtube`  | yt-dlp                                       | …to pass a YouTube URL to `rag.transcribe()` / `autorag transcribe` |
 | `rag`      | chromadb, umap-learn, scikit-learn, pydantic_sqlite, numpy | …`rag.persist_transcription()`, viz, or document RAG |
 | `server`   | fastapi, uvicorn[standard]                   | …`autorag serve` / the HTTP API                       |
 | `all`      | everything above                             | …the full local-dev stack                             |
@@ -65,9 +79,11 @@ Consumers then pin to the tag: `pip install "autorag[...] @ git+https://github.c
 ### `autorag transcribe`
 
 ```
-autorag transcribe FILE [OPTIONS]
+autorag transcribe SOURCE [OPTIONS]
 
-  --title            -t  TEXT   Clip title (defaults to filename stem)
+  SOURCE                        Audio file path or YouTube URL
+                                (youtube.com / youtu.be / m.youtube.com / music.youtube.com)
+  --title            -t  TEXT   Clip title (defaults to filename stem or video id)
   --whisper-model    -w  TEXT   Whisper model: tiny/base/small/medium/large  [default: base]
   --provider         -p  TEXT   LLM provider (ollama)  [default: ollama]
   --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
@@ -75,7 +91,7 @@ autorag transcribe FILE [OPTIONS]
   --db                   PATH  Override database path
 ```
 
-The same file always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
+For local files, the same path always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires the `[youtube]` extra) and currently produce a fresh session ID per run — see the follow-up plan for deterministic per-video session IDs. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
 
 Timing breakdown is printed to stderr after each run:
 

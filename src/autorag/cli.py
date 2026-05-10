@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path  # noqa: TC003
+import urllib.parse
+from pathlib import Path
 from typing import Any
 
 import typer
 
+from autorag.audio_source import is_youtube_url
 from autorag.core import AutoRAG
 
 app = typer.Typer(help="AutoRAG — automated retrieval-augmented generation.")
@@ -39,11 +41,24 @@ def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> No
     uvicorn.run("autorag.api:app", host=host, port=port, reload=reload)
 
 
+def _default_title_from(source: str) -> str:
+    """Derive a clip title from a local path or YouTube URL."""
+    if is_youtube_url(source):
+        parsed = urllib.parse.urlparse(source)
+        qs = urllib.parse.parse_qs(parsed.query)
+        video_id = (qs.get("v", [""])[0] or parsed.path.lstrip("/")).strip("/")
+        return video_id or "youtube-clip"
+    return Path(source).stem
+
+
 @app.command()
 def transcribe(
-    file: Path = typer.Argument(..., help="Audio file to transcribe (.webm, .mp4, etc.)"),
+    source: str = typer.Argument(
+        ...,
+        help="Audio file path or YouTube URL (youtube.com / youtu.be / ...).",
+    ),
     title: str | None = typer.Option(
-        None, "--title", "-t", help="Clip title (defaults to filename stem)"
+        None, "--title", "-t", help="Clip title (defaults to filename stem or video id)"
     ),
     whisper_model: str = typer.Option(
         "base",
@@ -68,31 +83,31 @@ def transcribe(
     ),
     db_override: Path | None = typer.Option(None, "--db", help="Override database path"),
 ) -> None:
-    """Transcribe an audio file and output topics as a JSON list."""
-    if not file.is_file():
-        typer.echo(f"Error: {file} is not a file.", err=True)
-        raise typer.Exit(1)
+    """Transcribe an audio file or YouTube URL and output topics as a JSON list."""
+    from autorag.audio_source import resolve_audio_input
 
     rag = AutoRAG()
+    resolved_title = title or _default_title_from(source)
 
-    t0 = time.perf_counter()
-    result = rag.transcribe(
-        file,
-        whisper_model=whisper_model,
-        llm_model=llm_model,
-        language=language or None,
-    )
-    agent_secs = time.perf_counter() - t0
+    with resolve_audio_input(source) as audio_path:
+        t0 = time.perf_counter()
+        result = rag.transcribe(
+            audio_path,
+            whisper_model=whisper_model,
+            llm_model=llm_model,
+            language=language or None,
+        )
+        agent_secs = time.perf_counter() - t0
 
-    persisted = rag.persist_transcription(
-        file,
-        result,
-        title=title,
-        provider=provider,
-        llm_model=llm_model,
-        whisper_model=whisper_model,
-        db_path=db_override,
-    )
+        persisted = rag.persist_transcription(
+            audio_path,
+            result,
+            title=resolved_title,
+            provider=provider,
+            llm_model=llm_model,
+            whisper_model=whisper_model,
+            db_path=db_override,
+        )
     p_timings = persisted["timings"]
     timings: dict[str, float] = {
         "agent": agent_secs,
