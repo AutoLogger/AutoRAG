@@ -101,10 +101,8 @@ Ollama is invoked via [LangChain (`langchain-ollama`)](https://pypi.org/project/
 |-----------------------------|--------------------------|----------------------------------------------------------------------------------------------------------|
 | `AUTORAG_OLLAMA_BASE_URL`   | `http://localhost:11434` | Ollama server URL (used by both the agent and the embedder)                                              |
 | `AUTORAG_DB_PATH`           | `~/.autorag/autorag.db`  | SQLite database path                                                                                     |
-| `AUTORAG_MODEL`             | `claude-sonnet-4-6`      | LLM used by the RAG generator                                                                            |
 | `AUTORAG_CHUNK_SIZE`        | `1000`                   | Characters per chunk when ingesting                                                                      |
 | `AUTORAG_CHUNK_OVERLAP`     | `200`                    | Overlap between consecutive chunks                                                                       |
-| `AUTORAG_TOP_K`             | `5`                      | Default number of chunks to retrieve                                                                     |
 | `AUTOLOGGER_WHISPER_DEVICE` | `auto`                   | `auto`, `cpu`, or `cuda` (Whisper + pyannote)                                                            |
 | `AUTOLOGGER_EMBED_MODEL`    | `nomic-embed-text`       | Ollama model for topic title embeddings                                                                  |
 | `HF_TOKEN`                  | *(unset)*                | HuggingFace token for `pyannote/speaker-diarization-3.1`. Without it, every word is labeled speaker `"0"`. |

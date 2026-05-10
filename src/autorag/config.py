@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTORAG_", env_file=".env", extra="ignore")
 
-    data_dir: Path = Path("./data")
     chunk_size: int = 1000
     chunk_overlap: int = 200
     top_k: int = 5
