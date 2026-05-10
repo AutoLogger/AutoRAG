@@ -51,7 +51,7 @@ def _torch_cuda_available() -> bool:
 def _device_preference() -> str:
     if _cpu_pinned:
         return "cpu"
-    raw = os.environ.get("AUTOLOGGER_WHISPER_DEVICE", "auto").strip().lower()
+    raw = os.environ.get("AUTORAG_WHISPER_DEVICE", "auto").strip().lower()
     if raw == "cpu":
         return "cpu"
     return "cuda" if _torch_cuda_available() else "cpu"

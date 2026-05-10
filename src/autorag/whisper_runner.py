@@ -2,7 +2,7 @@
 
 The model cache is keyed by `(size, device)` and guarded by a module-level
 `threading.Lock`. We choose `cuda` when available (and not explicitly forced
-off by `AUTOLOGGER_WHISPER_DEVICE=cpu`); on the first CUDA failure (OOM,
+off by `AUTORAG_WHISPER_DEVICE=cpu`); on the first CUDA failure (OOM,
 driver mismatch, etc.) we catch it once, log a warning, reload on CPU, and
 pin the whole process to CPU for the rest of its lifetime.
 """
@@ -41,10 +41,10 @@ def _torch_cuda_available() -> bool:
 
 
 def _device_preference() -> str:
-    """Resolve the preferred device honoring `AUTOLOGGER_WHISPER_DEVICE`."""
+    """Resolve the preferred device honoring `AUTORAG_WHISPER_DEVICE`."""
     if _cpu_pinned:
         return "cpu"
-    raw = os.environ.get("AUTOLOGGER_WHISPER_DEVICE", "auto").strip().lower()
+    raw = os.environ.get("AUTORAG_WHISPER_DEVICE", "auto").strip().lower()
     if raw == "cpu":
         return "cpu"
     if raw == "cuda":

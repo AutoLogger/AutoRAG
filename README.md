@@ -163,8 +163,8 @@ Ollama is invoked via [LangChain (`langchain-ollama`)](https://pypi.org/project/
 | `AUTORAG_DB_PATH`           | `~/.autorag/autorag.db`  | SQLite database path                                                                                     |
 | `AUTORAG_CHUNK_SIZE`        | `1000`                   | Characters per chunk when ingesting                                                                      |
 | `AUTORAG_CHUNK_OVERLAP`     | `200`                    | Overlap between consecutive chunks                                                                       |
-| `AUTOLOGGER_WHISPER_DEVICE` | `auto`                   | `auto`, `cpu`, or `cuda` (Whisper + pyannote)                                                            |
-| `AUTOLOGGER_EMBED_MODEL`    | `nomic-embed-text`       | Ollama model for topic title embeddings                                                                  |
+| `AUTORAG_WHISPER_DEVICE`    | `auto`                   | `auto`, `cpu`, or `cuda` (Whisper + pyannote)                                                            |
+| `AUTORAG_EMBED_MODEL`       | `nomic-embed-text`       | Ollama model for topic title embeddings                                                                  |
 | `HF_TOKEN`                  | *(unset)*                | HuggingFace token for `pyannote/speaker-diarization-3.1`. Without it, every word is labeled speaker `"0"`. |
 
 Whisper and PyTorch ship with the `[audio]` extra; pyannote with `[diarize]`. See **Install as a library** for the extras matrix.

@@ -14,7 +14,7 @@ class Embedder:
         resolved_base = (
             base_url or os.environ.get("AUTORAG_OLLAMA_BASE_URL", "http://localhost:11434")
         ).rstrip("/")
-        resolved_model = model or os.environ.get("AUTOLOGGER_EMBED_MODEL", "nomic-embed-text")
+        resolved_model = model or os.environ.get("AUTORAG_EMBED_MODEL", "nomic-embed-text")
         self.base_url = resolved_base
         self.model = resolved_model
         self._embeddings = OllamaEmbeddings(base_url=resolved_base, model=resolved_model)

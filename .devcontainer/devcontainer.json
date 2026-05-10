@@ -34,7 +34,7 @@
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=autologger-${devcontainerId},target=/home/.autologger,type=volume",
+    "source=autorag-${devcontainerId},target=/home/node/.autorag,type=volume",
     "source=uv-cache,target=/home/node/.cache/uv,type=volume",
     "source=npm-cache,target=/home/node/.npm,type=volume",
     "source=chrome-config,target=/home/node/.config/google-chrome,type=volume",
@@ -70,7 +70,7 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "postStartCommand": "cd /workspace && uv sync && rm -f /home/node/.config/google-chrome/SingletonLock /home/node/.config/google-chrome/SingletonCookie /home/node/.config/google-chrome/SingletonSocket",
+  "postStartCommand": "cd /workspace && uv sync --all-extras && rm -f /home/node/.config/google-chrome/SingletonLock /home/node/.config/google-chrome/SingletonCookie /home/node/.config/google-chrome/SingletonSocket",
   // "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
   "waitFor": "postStartCommand"
 }

@@ -75,6 +75,7 @@ RUN mkdir -p /workspace /home/node/.claude \
       /home/node/.local/share \
       /home/node/.config/google-chrome \
       /home/node/.config/matplotlib \
+      /home/node/.autorag \
       /etc/opt/chrome/policies/managed \
       /etc/opt/chrome/policies/recommended \
       /home/node/.npm \
@@ -83,6 +84,7 @@ RUN mkdir -p /workspace /home/node/.claude \
     /home/node/.cache /home/node/.local/share \
     /home/node/.config/google-chrome \
     /home/node/.config/matplotlib \
+    /home/node/.autorag \
     /home/node/.npm && \
   chown -R node:node /etc/opt/chrome/policies && \
   chown node:node /run/user/1000 && chmod 700 /run/user/1000
