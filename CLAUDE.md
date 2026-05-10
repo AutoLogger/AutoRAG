@@ -72,17 +72,25 @@ children → category `l1`, L1 children → `l2`, L2 children → `l3`.
 
 `src/autorag/audio_source.py` provides URL detection (`is_youtube_url`,
 host-allowlisted via `urllib.parse`) and a `resolve_audio_input(source)`
-context manager that yields a local `Path`. For YouTube URLs it downloads
-the best audio stream into a `tempfile.TemporaryDirectory(prefix="autorag-yt-")`
+context manager that yields an `AudioSource` dataclass with `path`,
+`source_url`, and `video_id`. For YouTube URLs it downloads the best
+audio stream into a `tempfile.TemporaryDirectory(prefix="autorag-yt-")`
 via `yt_dlp` (lazy-imported inside the helper, gated by the `[youtube]`
-extra; raises `MissingExtraError("youtube", ...)` when missing). For
-non-URL inputs it just verifies the path exists and yields it through.
+extra; raises `MissingExtraError("youtube", ...)` when missing) and
+populates `source_url` / `video_id` from yt-dlp's info dict. For non-URL
+inputs it verifies the path exists and yields a path-only `AudioSource`
+(`source_url=None`, `video_id=None`).
 
 Both `core.AutoRAG.transcribe()` and the CLI wrap their work in
 `resolve_audio_input`. The CLI must own the temp lifetime itself because
 it calls both `transcribe` and `persist_transcription` on the same path —
 inner `core.transcribe`'s wrapper is a no-op pass-through for an
-already-local Path, so the double-wrap is safe and idempotent.
+already-local Path, so the double-wrap is safe and idempotent. The CLI
+also forwards `src.source_url` to `persist_transcription` so the clip's
+`session_id` is seeded from the canonical YouTube URL
+(`_canonical_youtube_url` collapses `youtu.be` / `m.youtube.com` /
+`www.youtube.com` variants to one form), making re-runs overwrite the
+same SQLite row instead of producing duplicates.
 
 ### Ollama tuning notes (server-side)
 

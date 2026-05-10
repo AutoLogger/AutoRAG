@@ -101,9 +101,9 @@ class AutoRAG:
         except ModuleNotFoundError as exc:
             raise _missing_extra("audio,diarize", exc) from exc
 
-        with resolve_audio_input(file) as audio_path:
+        with resolve_audio_input(file) as src:
             return _agent_transcribe(
-                audio_path,
+                src.path,
                 whisper_model=whisper_model,
                 llm_model=llm_model,
                 language=language,
@@ -131,6 +131,7 @@ class AutoRAG:
         llm_model: str = "qwen2.5:14b-instruct-q8_0",
         whisper_model: str = "base",
         db_path: Path | None = None,
+        source_url: str | None = None,
     ) -> dict[str, Any]:
         """Write a transcription + topic tree to SQLite (clip + words + events) and
         index topic-title embeddings into Chroma. Returns a dict with the stored
@@ -138,8 +139,15 @@ class AutoRAG:
 
         Requires ``pip install 'autorag[rag]'`` (chromadb + pydantic_sqlite).
         ``whisper_model`` is recorded as metadata only.
+
+        ``source_url`` (optional) is the original input URL when ``file`` is a
+        local copy of remote content (e.g. a yt-dlp download). When supplied,
+        the clip's ``session_id`` is seeded from the canonical URL instead of
+        the local path, so re-fetching the same URL replaces the existing
+        clip rather than creating a duplicate.
         """
         try:
+            from autorag.audio_source import _canonical_youtube_url, is_youtube_url
             from autorag.chroma_store import ChromaStore, default_chroma_dir
             from autorag.db import Database
             from autorag.persistence import (
@@ -156,7 +164,12 @@ class AutoRAG:
         resolved_db = (db_path or self.settings.db_path).expanduser()
         db = Database(resolved_db)
 
-        session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+        if source_url is not None and is_youtube_url(source_url):
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, _canonical_youtube_url(source_url)))
+        elif source_url is not None:
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_url))
+        else:
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
         clip_title = title or path.stem
         mtime = path.stat().st_mtime
         created_at = datetime.fromtimestamp(mtime, tz=UTC).isoformat().replace("+00:00", "Z")

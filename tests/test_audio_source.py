@@ -4,7 +4,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from autorag.audio_source import is_youtube_url, resolve_audio_input
+from autorag.audio_source import (
+    AudioSource,
+    _canonical_youtube_url,
+    is_youtube_url,
+    resolve_audio_input,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,13 +48,36 @@ def test_is_youtube_url_rejects(value: str) -> None:
     assert not is_youtube_url(value)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://youtu.be/dQw4w9WgXcQ",
+        "http://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share",
+    ],
+)
+def test_canonical_youtube_url_collapses_host_variants(url: str) -> None:
+    assert _canonical_youtube_url(url) == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+def test_canonical_youtube_url_raises_when_id_missing() -> None:
+    with pytest.raises(ValueError):
+        _canonical_youtube_url("https://www.youtube.com/feed/subscriptions")
+
+
 def test_resolve_audio_input_local_file_passthrough(tmp_path: Path) -> None:
     audio = tmp_path / "clip.webm"
     audio.write_bytes(b"fake-audio")
 
     with resolve_audio_input(audio) as resolved:
-        assert resolved == audio
-        assert resolved.is_file()
+        assert isinstance(resolved, AudioSource)
+        assert resolved.path == audio
+        assert resolved.path.is_file()
+        assert resolved.source_url is None
+        assert resolved.video_id is None
 
 
 def test_resolve_audio_input_local_string_passthrough(tmp_path: Path) -> None:
@@ -57,7 +85,9 @@ def test_resolve_audio_input_local_string_passthrough(tmp_path: Path) -> None:
     audio.write_bytes(b"fake-audio")
 
     with resolve_audio_input(str(audio)) as resolved:
-        assert resolved == audio
+        assert resolved.path == audio
+        assert resolved.source_url is None
+        assert resolved.video_id is None
 
 
 def test_resolve_audio_input_missing_local_raises(tmp_path: Path) -> None:

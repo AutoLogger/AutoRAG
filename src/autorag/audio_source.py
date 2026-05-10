@@ -4,6 +4,7 @@ import logging
 import tempfile
 import urllib.parse
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,19 @@ _YOUTUBE_HOSTS: frozenset[str] = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class AudioSource:
+    """Resolved audio input plus its original-source identity, if any.
+
+    ``path`` is the local file the rest of the pipeline reads. ``source_url``
+    and ``video_id`` are populated only when the input was a YouTube URL.
+    """
+
+    path: Path
+    source_url: str | None
+    video_id: str | None
+
+
 def is_youtube_url(value: str) -> bool:
     """Return True iff ``value`` parses as an http(s) URL on a YouTube host."""
     parsed = urllib.parse.urlparse(value)
@@ -34,27 +48,52 @@ def is_youtube_url(value: str) -> bool:
     return host in _YOUTUBE_HOSTS
 
 
+def _canonical_youtube_url(url: str) -> str:
+    """Return a normalized ``https://www.youtube.com/watch?v=<id>`` URL.
+
+    Collapses ``youtu.be/<id>``, ``m.youtube.com/watch?v=<id>``, etc. to a
+    single canonical string so the same video hashes to the same id under
+    :func:`uuid.uuid5`. Raises :class:`ValueError` if no video id can be
+    extracted.
+    """
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower()
+    video_id: str | None = None
+    if host == "youtu.be":
+        video_id = parsed.path.lstrip("/").split("/", 1)[0] or None
+    elif host in _YOUTUBE_HOSTS:
+        qs = urllib.parse.parse_qs(parsed.query)
+        v = qs.get("v", [""])[0].strip()
+        if v:
+            video_id = v
+    if not video_id:
+        raise ValueError(f"could not extract YouTube video id from URL: {url}")
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
 @contextmanager
-def resolve_audio_input(source: Path | str) -> Iterator[Path]:
-    """Yield a local ``Path`` for ``source``.
+def resolve_audio_input(source: Path | str) -> Iterator[AudioSource]:
+    """Yield an :class:`AudioSource` for ``source``.
 
     If ``source`` is a YouTube URL, download the best audio stream into a
-    temporary directory and yield that file's path. The tempdir is removed
-    on exit. Otherwise treat ``source`` as a local path and yield it after
-    verifying it exists.
+    temporary directory and yield a populated ``AudioSource`` whose ``path``
+    points into that tempdir. The tempdir is removed on exit. Otherwise treat
+    ``source`` as a local path and yield a path-only ``AudioSource`` after
+    verifying the file exists.
     """
     if isinstance(source, str) and is_youtube_url(source):
         with tempfile.TemporaryDirectory(prefix="autorag-yt-") as tmp:
-            yield _download_youtube_audio(source, Path(tmp))
+            path, video_id = _download_youtube_audio(source, Path(tmp))
+            yield AudioSource(path=path, source_url=source, video_id=video_id)
         return
 
     path = Path(source)
     if not path.is_file():
         raise FileNotFoundError(f"audio source not found: {path}")
-    yield path
+    yield AudioSource(path=path, source_url=None, video_id=None)
 
 
-def _download_youtube_audio(url: str, dest_dir: Path) -> Path:
+def _download_youtube_audio(url: str, dest_dir: Path) -> tuple[Path, str]:
     try:
         import yt_dlp
     except ModuleNotFoundError as exc:
@@ -71,6 +110,9 @@ def _download_youtube_audio(url: str, dest_dir: Path) -> Path:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         out = Path(ydl.prepare_filename(info))
+        video_id = str(info.get("id") or "").strip()
     if not out.is_file():
         raise RuntimeError(f"yt-dlp did not produce expected file: {out}")
-    return out
+    if not video_id:
+        raise RuntimeError(f"yt-dlp did not return a video id for: {url}")
+    return out, video_id

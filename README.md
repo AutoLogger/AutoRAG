@@ -91,7 +91,7 @@ autorag transcribe SOURCE [OPTIONS]
   --db                   PATH  Override database path
 ```
 
-For local files, the same path always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires the `[youtube]` extra) and currently produce a fresh session ID per run — see the follow-up plan for deterministic per-video session IDs. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
+For local files, the same path always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires the `[youtube]` extra) and the session ID is seeded from the canonical `https://www.youtube.com/watch?v=<id>` URL — `youtu.be/X`, `m.youtube.com/watch?v=X`, and `www.youtube.com/watch?v=X` all collapse to the same row. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
 
 Timing breakdown is printed to stderr after each run:
 
