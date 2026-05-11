@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import Runnable
 
     from autorag.schemas import Chunk
-    from autorag.types import TranscriptionResult, WordSpan
+    from autorag.types import TopicTree, TranscriptionResult, WordSpan
 
 logger = logging.getLogger(__name__)
 
@@ -76,39 +76,98 @@ class AutoRAG:
 
     # ── Audio → topics ────────────────────────────────────────────────────
 
+    def _resolve_clip_identity(
+        self,
+        file: Path | str,
+        source_url: str | None,
+        upload_date: str | None,
+    ) -> tuple[str, datetime, str]:
+        """Return (session_id, audio_start, stored_file_path) for a clip."""
+        from autorag.audio_source import _canonical_youtube_url, is_youtube_url
+
+        path = Path(file)
+        canonical_source_url: str | None = None
+        if source_url is not None and is_youtube_url(source_url):
+            canonical_source_url = _canonical_youtube_url(source_url)
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, canonical_source_url))
+        elif source_url is not None:
+            canonical_source_url = source_url
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_url))
+        else:
+            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+
+        if upload_date:
+            uploaded_at = datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=UTC)
+            audio_start: datetime = uploaded_at
+        else:
+            try:
+                mtime = path.stat().st_mtime
+                audio_start = datetime.fromtimestamp(mtime, tz=UTC)
+            except OSError:
+                audio_start = datetime.now(tz=UTC)
+
+        stored_file_path = canonical_source_url or str(path.resolve())
+        return (session_id, audio_start, stored_file_path)
+
     def transcribe(
         self,
         file: Path | str,
         *,
         whisper_model: str = "base",
-        llm_model: str = "qwen2.5:14b-instruct-q8_0",
         language: str | None = None,
-    ) -> TranscriptionResult:
-        """Run Whisper + LLM topic extraction on an audio file or YouTube URL.
+    ) -> list[WordSpan]:
+        """Run Whisper + diarization on an audio file or YouTube URL.
 
         ``file`` is either a local audio file path or a YouTube URL
         (``youtube.com``, ``youtu.be``, ``m.youtube.com``,
         ``music.youtube.com``). YouTube URLs are downloaded to a temporary
         ``.webm`` for the duration of the call.
 
-        Requires ``pip install 'autorag[audio,diarize]'`` for transcription,
-        plus ``[youtube]`` when passing a URL. Returns the raw
-        ``{transcription, topics}`` dict. Use :meth:`persist_transcription`
-        to write to SQLite + Chroma (separate ``[rag]`` extra).
+        Returns raw word spans. Use :meth:`generate_topics` for the LLM
+        topic tree, and :meth:`persist_transcription` / :meth:`persist_topics`
+        to store results (separate ``[rag]`` extra).
+
+        Requires ``pip install 'autorag[audio,diarize]'``,
+        plus ``[youtube]`` when passing a URL.
         """
         try:
-            from autorag.agent import transcribe as _agent_transcribe
+            from autorag.agent import transcribe_audio as _transcribe_audio
             from autorag.audio_source import resolve_audio_input
         except ModuleNotFoundError as exc:
             raise _missing_extra("audio,diarize", exc) from exc
 
         with resolve_audio_input(file) as src:
-            return _agent_transcribe(
-                src.path,
-                whisper_model=whisper_model,
-                llm_model=llm_model,
-                language=language,
-            )
+            return _transcribe_audio(src.path, whisper_model=whisper_model, language=language)
+
+    def generate_topics(
+        self,
+        words: list[WordSpan],
+        *,
+        llm_model: str = "qwen2.5:14b-instruct-q8_0",
+        ollama_base_url: str | None = None,
+        num_ctx_l1: int = 16384,
+        num_ctx_fanout: int = 8192,
+        max_concurrency: int = 4,
+        min_subdivide_duration_s: float = 120.0,
+    ) -> TopicTree:
+        """Run LLM topic extraction on pre-computed word spans.
+
+        Requires ``pip install 'autorag[audio,diarize]'`` (LangChain + Ollama).
+        """
+        try:
+            from autorag.agent import generate_topics as _agent_generate_topics
+        except ModuleNotFoundError as exc:
+            raise _missing_extra("audio,diarize", exc) from exc
+
+        return _agent_generate_topics(
+            words,
+            llm_model=llm_model,
+            ollama_base_url=ollama_base_url,
+            num_ctx_l1=num_ctx_l1,
+            num_ctx_fanout=num_ctx_fanout,
+            max_concurrency=max_concurrency,
+            min_subdivide_duration_s=min_subdivide_duration_s,
+        )
 
     def build_agent(self, **kwargs: Any) -> Runnable[Path | str, TranscriptionResult]:
         """Return the LangChain :class:`Runnable` for batched / streaming use.
@@ -130,10 +189,8 @@ class AutoRAG:
         force_retranscribe: bool = False,
         db_path: Path | None = None,
         whisper_model: str = "base",
-        llm_model: str = "qwen2.5:14b-instruct-q8_0",
         language: str | None = None,
         title: str | None = None,
-        provider: str = "ollama",
     ) -> str:
         """Return the transcription formatted as N-second time blocks.
 
@@ -142,9 +199,9 @@ class AutoRAG:
           2. If SQLite has a row for ``session_id`` with a non-null
              ``transcription`` and ``force_retranscribe`` is False, decode
              it and format — returns immediately (no ``[audio]`` needed).
-          3. Else run :meth:`transcribe` then :meth:`persist_transcription`
-             (matching the CLI ``transcribe`` command), then format the
-             freshly produced words.
+          3. Else run :meth:`transcribe` and :meth:`persist_transcription`,
+             then format. Topic generation is not performed here; call
+             :meth:`generate_topics` and :meth:`persist_topics` separately.
 
         Each non-empty bucket emits one line per speaker turn,
         ``MM:SS-MM:SS Speaker K: <words>``. See
@@ -179,70 +236,46 @@ class AutoRAG:
 
         source_str = file if isinstance(file, str) else str(file)
         with resolve_audio_input(file) as src:
-            result = self.transcribe(
-                src.path,
-                whisper_model=whisper_model,
-                llm_model=llm_model,
-                language=language,
-            )
+            words = self.transcribe(src.path, whisper_model=whisper_model, language=language)
             resolved_title = title or src.title or default_title_from(source_str)
             self.persist_transcription(
                 src.path,
-                result,
+                words,
                 title=resolved_title,
-                provider=provider,
-                llm_model=llm_model,
-                whisper_model=whisper_model,
                 db_path=db_path,
                 source_url=src.source_url,
                 upload_date=src.upload_date,
                 duration_s=src.duration_s,
             )
-        return format_blocks(result["transcription"], seconds)
+        return format_blocks(words, seconds)
 
     def persist_transcription(
         self,
         file: Path | str,
-        result: TranscriptionResult,
+        words: list[WordSpan],
         *,
         title: str | None = None,
-        provider: str = "ollama",
-        llm_model: str = "qwen2.5:14b-instruct-q8_0",
-        whisper_model: str = "base",
         db_path: Path | None = None,
         source_url: str | None = None,
         upload_date: str | None = None,
         duration_s: float | None = None,
     ) -> dict[str, Any]:
-        """Write a transcription + topic tree to SQLite (clip + words + events) and
-        index topic-title embeddings into Chroma. Returns a dict with the stored
-        clip row plus a ``timings`` breakdown.
+        """Write word spans to SQLite (clip row + words). Returns clip + session_id + timings.
 
-        Requires ``pip install 'autorag[rag]'`` (chromadb + pydantic_sqlite).
-        ``whisper_model`` is recorded as metadata only.
+        Requires ``pip install 'autorag[rag]'`` (pydantic_sqlite).
+        ``duration_s`` is informational and not persisted.
 
-        ``source_url`` (optional) is the original input URL when ``file`` is a
-        local copy of remote content (e.g. a yt-dlp download). When supplied,
-        the clip's ``session_id`` is seeded from the canonical URL instead of
-        the local path, so re-fetching the same URL replaces the existing
-        clip rather than creating a duplicate. ``file_path`` in the stored row
-        is also set to the canonical URL so it remains valid after the temp
-        download is gone.
+        ``source_url`` (optional) seeds ``session_id`` from the canonical URL
+        so re-fetching the same URL overwrites the existing row.
 
-        ``upload_date`` (optional, ``"YYYYMMDD"`` from yt-dlp) anchors the
-        clip's ``created_at`` (and absolute event timestamps) to when the
-        video was published, instead of when the temp file was written.
-        ``duration_s`` is currently informational and not persisted.
+        ``upload_date`` (optional, ``"YYYYMMDD"`` from yt-dlp) anchors
+        ``created_at`` to the video's publish date.
+
+        Use :meth:`persist_topics` to store the topic tree and embed titles.
         """
         del duration_s  # informational; no schema column for it yet
         try:
-            from autorag.audio_source import _canonical_youtube_url, is_youtube_url
-            from autorag.chroma_store import ChromaStore, default_chroma_dir
             from autorag.db import Database
-            from autorag.persistence import (
-                collapse_lone_children,
-                topics_to_events,
-            )
         except ModuleNotFoundError as exc:
             raise _missing_extra("rag", exc) from exc
 
@@ -253,28 +286,11 @@ class AutoRAG:
         resolved_db = (db_path or self.settings.db_path).expanduser()
         db = Database(resolved_db)
 
-        canonical_source_url: str | None = None
-        if source_url is not None and is_youtube_url(source_url):
-            canonical_source_url = _canonical_youtube_url(source_url)
-            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, canonical_source_url))
-        elif source_url is not None:
-            canonical_source_url = source_url
-            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_url))
-        else:
-            session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
-
+        session_id, audio_start, stored_file_path = self._resolve_clip_identity(
+            file, source_url, upload_date
+        )
         clip_title = title or path.stem
-
-        if upload_date:
-            uploaded_at = datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=UTC)
-            created_at = uploaded_at.isoformat().replace("+00:00", "Z")
-            audio_start = uploaded_at
-        else:
-            mtime = path.stat().st_mtime
-            created_at = datetime.fromtimestamp(mtime, tz=UTC).isoformat().replace("+00:00", "Z")
-            audio_start = datetime.fromtimestamp(mtime, tz=UTC)
-
-        stored_file_path = canonical_source_url or str(path.resolve())
+        created_at = audio_start.isoformat().replace("+00:00", "Z")
 
         db.create_clip(
             session_id,
@@ -283,17 +299,82 @@ class AutoRAG:
             created_at=created_at,
         )
 
-        words: list[WordSpan] = result["transcription"]
-        topic_tree = collapse_lone_children(result["topics"])
-
         t = time.perf_counter()
         db.store_transcription(session_id, words)  # type: ignore[arg-type]
         store_words_s = time.perf_counter() - t
 
-        transcript_end_s = 0.0
-        if words:
+        clip = db.get_clip(session_id)
+        return {
+            "clip": clip,
+            "session_id": session_id,
+            "timings": {"store_words": store_words_s},
+        }
+
+    def persist_topics(
+        self,
+        file: Path | str,
+        topics: TopicTree,
+        *,
+        words: list[WordSpan] | None = None,
+        transcript_end_s: float | None = None,
+        title: str | None = None,
+        provider: str = "ollama",
+        llm_model: str = "qwen2.5:14b-instruct-q8_0",
+        whisper_model: str = "base",
+        db_path: Path | None = None,
+        source_url: str | None = None,
+        upload_date: str | None = None,
+        duration_s: float | None = None,
+    ) -> dict[str, Any]:
+        """Store topic tree to SQLite and embed topic titles into Chroma.
+
+        Requires ``pip install 'autorag[rag]'`` (chromadb + pydantic_sqlite).
+
+        Call :meth:`persist_transcription` first to create the clip row;
+        this method will create it idempotently if needed.
+
+        ``transcript_end_s``: audio end time in seconds used to anchor events.
+        Computed from ``words[-1]`` when ``words`` is supplied, else ``0.0``.
+        ``duration_s`` is informational and not persisted.
+        """
+        del duration_s  # informational; no schema column for it yet
+        try:
+            from autorag.audio_source import is_youtube_url
+            from autorag.chroma_store import ChromaStore, default_chroma_dir
+            from autorag.db import Database
+            from autorag.persistence import collapse_lone_children, topics_to_events
+        except ModuleNotFoundError as exc:
+            raise _missing_extra("rag", exc) from exc
+
+        path = Path(file)
+        if not is_youtube_url(str(file)) and not path.is_file():
+            raise FileNotFoundError(f"{path} is not a file.")
+
+        resolved_db = (db_path or self.settings.db_path).expanduser()
+        db = Database(resolved_db)
+
+        session_id, audio_start, stored_file_path = self._resolve_clip_identity(
+            file, source_url, upload_date
+        )
+        clip_title = title or path.stem
+        created_at = audio_start.isoformat().replace("+00:00", "Z")
+
+        db.create_clip(
+            session_id,
+            title=clip_title,
+            file_path=stored_file_path,
+            created_at=created_at,
+        )
+
+        if transcript_end_s is not None:
+            end_s = transcript_end_s
+        elif words:
             last = words[-1]
-            transcript_end_s = last.get("abs_s", 0.0) + (last.get("e", 0.0) - last.get("s", 0.0))
+            end_s = last.get("e", 0.0)
+        else:
+            end_s = 0.0
+
+        topic_tree = collapse_lone_children(topics)
 
         t = time.perf_counter()
         pending_events = topics_to_events(
@@ -307,7 +388,7 @@ class AutoRAG:
         )
         db.finalize_topics(
             session_id,
-            transcript_end_s,
+            end_s,
             events=pending_events,
             provider=provider,
             llm_model=llm_model,
@@ -318,9 +399,10 @@ class AutoRAG:
         t = time.perf_counter()
         clip_data = db.get_clip(session_id)
         if clip_data and clip_data.get("topics"):
-            topics = [t for t in json.loads(clip_data["topics"]) if t.get("title")]
+            topic_list = [tp for tp in json.loads(clip_data["topics"]) if tp.get("title")]
             texts = [
-                f"{t['title']}. {t['summary']}" if t.get("summary") else t["title"] for t in topics
+                f"{tp['title']}. {tp['summary']}" if tp.get("summary") else tp["title"]
+                for tp in topic_list
             ]
             if texts:
                 try:
@@ -330,7 +412,7 @@ class AutoRAG:
                     chroma.add_topic_embeddings(
                         session_id,
                         str(clip_data.get("title", "")),
-                        topics,
+                        topic_list,
                         embeddings,
                     )
                 except Exception as exc:
@@ -341,9 +423,5 @@ class AutoRAG:
         return {
             "clip": clip,
             "session_id": session_id,
-            "timings": {
-                "store_words": store_words_s,
-                "finalize": finalize_s,
-                "embed": embed_s,
-            },
+            "timings": {"finalize": finalize_s, "embed": embed_s},
         }

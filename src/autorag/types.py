@@ -14,7 +14,6 @@ class WordSpan(TypedDict, total=False):
     w: str
     s: float
     e: float
-    abs_s: float
     segment_id: str
     speaker: str
 

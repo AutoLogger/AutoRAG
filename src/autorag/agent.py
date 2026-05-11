@@ -197,7 +197,6 @@ def _run_whisper(file: Path, *, model_size: str, language: str | None) -> list[W
                 "w": str(w["w"]),
                 "s": s,
                 "e": float(w["e"]),
-                "abs_s": s,
                 "segment_id": "single",
                 "speaker": label,
             }
@@ -303,18 +302,16 @@ def _new_node(s: float, e: float, *, title: str = "", summary: str = "") -> Topi
     return {"title": title, "summary": summary, "s": s, "e": e, "children": []}
 
 
-def build_agent(
+def build_topic_runnable(
     *,
-    whisper_model: str = "base",
-    language: str | None = None,
     llm_model: str = "qwen2.5:14b-instruct-q8_0",
     ollama_base_url: str | None = None,
     num_ctx_l1: int = 16384,
     num_ctx_fanout: int = 8192,
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
-) -> Runnable[Path | str, TranscriptionResult]:
-    """Build a Runnable mapping audio file -> {transcription, topics:{topics:[L0]}}.
+) -> Runnable[list[WordSpan], TopicTree]:
+    """Build a Runnable mapping list[WordSpan] -> TopicTree (L0/L1/L2 hierarchy).
 
     Notes on Ollama settings (server-side, controlled outside this module):
 
@@ -489,9 +486,9 @@ def build_agent(
         )
         return _new_node(0.0, audio_e, title=result.title, summary=result.summary)
 
-    def _build_tree(spans: list[WordSpan]) -> TranscriptionResult:
+    def _build_tree(spans: list[WordSpan]) -> TopicTree:
         if not spans:
-            return {"transcription": spans, "topics": {"topics": []}}
+            return {"topics": []}
 
         audio_e = _audio_end(spans)
 
@@ -540,7 +537,31 @@ def build_agent(
         l0["children"] = l1_nodes
         logger.info("Stage 5 done in %.1fs", time.time() - t0)
 
-        return {"transcription": spans, "topics": {"topics": [l0]}}
+        return {"topics": [l0]}
+
+    return RunnableLambda(_build_tree)
+
+
+def build_agent(
+    *,
+    whisper_model: str = "base",
+    language: str | None = None,
+    llm_model: str = "qwen2.5:14b-instruct-q8_0",
+    ollama_base_url: str | None = None,
+    num_ctx_l1: int = 16384,
+    num_ctx_fanout: int = 8192,
+    max_concurrency: int = 4,
+    min_subdivide_duration_s: float = 120.0,
+) -> Runnable[Path | str, TranscriptionResult]:
+    """Build a Runnable mapping audio file -> {transcription, topics:{topics:[L0]}}."""
+    topic_runnable = build_topic_runnable(
+        llm_model=llm_model,
+        ollama_base_url=ollama_base_url,
+        num_ctx_l1=num_ctx_l1,
+        num_ctx_fanout=num_ctx_fanout,
+        max_concurrency=max_concurrency,
+        min_subdivide_duration_s=min_subdivide_duration_s,
+    )
 
     def _whisper_step(file: Path | str) -> list[WordSpan]:
         f = Path(file)
@@ -550,7 +571,31 @@ def build_agent(
         logger.info("Stage 1 done in %.1fs (%d words)", time.time() - t0, len(spans))
         return spans
 
-    return RunnableLambda(_whisper_step) | RunnableLambda(_build_tree)
+    def _assemble(spans: list[WordSpan]) -> TranscriptionResult:
+        topics: TopicTree = topic_runnable.invoke(spans)
+        return {"transcription": spans, "topics": topics}
+
+    return RunnableLambda(_whisper_step) | RunnableLambda(_assemble)
+
+
+def transcribe_audio(
+    file: Path | str,
+    *,
+    whisper_model: str = "base",
+    language: str | None = None,
+) -> list[WordSpan]:
+    """Run Whisper + diarization on a local audio file, returning word spans."""
+    f = Path(file)
+    logger.info("Stage 1 (Whisper): transcribing %s", f.name)
+    t0 = time.time()
+    spans = _run_whisper(f, model_size=whisper_model, language=language)
+    logger.info("Stage 1 done in %.1fs (%d words)", time.time() - t0, len(spans))
+    return spans
+
+
+def generate_topics(words: list[WordSpan], **kwargs: Any) -> TopicTree:
+    """Build the topic runnable and invoke it once."""
+    return build_topic_runnable(**kwargs).invoke(words)
 
 
 def transcribe(file: Path | str, **kwargs: Any) -> TranscriptionResult:
@@ -564,5 +609,8 @@ __all__ = [
     "TranscriptionResult",
     "WordSpan",
     "build_agent",
+    "build_topic_runnable",
+    "generate_topics",
     "transcribe",
+    "transcribe_audio",
 ]

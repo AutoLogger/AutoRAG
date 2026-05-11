@@ -37,9 +37,9 @@ def _make_audio_file(parent: Path) -> Path:
 def _result() -> dict[str, Any]:
     return {
         "transcription": [
-            {"w": "hello", "s": 1.0, "e": 1.5, "abs_s": 1.0, "speaker": "0"},
-            {"w": "there", "s": 1.5, "e": 2.0, "abs_s": 1.5, "speaker": "0"},
-            {"w": "hi", "s": 12.0, "e": 12.5, "abs_s": 12.0, "speaker": "1"},
+            {"w": "hello", "s": 1.0, "e": 1.5, "speaker": "0"},
+            {"w": "there", "s": 1.5, "e": 2.0, "speaker": "0"},
+            {"w": "hi", "s": 12.0, "e": 12.5, "speaker": "1"},
         ],
         "topics": {
             "topics": [
@@ -61,7 +61,7 @@ def test_reads_from_sqlite_when_present(autorag_no_embed: AutoRAG, tmp_path: Pat
 
     autorag_no_embed.persist_transcription(
         audio,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
     )
 
@@ -78,7 +78,7 @@ def test_url_uses_canonical_session_id(
 
     autorag_no_embed.persist_transcription(
         audio,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
         source_url="https://youtu.be/dQw4w9WgXcQ",
     )
@@ -106,15 +106,15 @@ def test_force_retranscribe_bypasses_cache(
 
     autorag_no_embed.persist_transcription(
         audio,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
     )
 
     called = {"n": 0}
 
-    def _sentinel(self: AutoRAG, file: object, **_kwargs: object) -> dict[str, Any]:
+    def _sentinel(self: AutoRAG, file: object, **_kwargs: object) -> list[Any]:
         called["n"] += 1
-        return _result()
+        return _result()["transcription"]
 
     monkeypatch.setattr(AutoRAG, "transcribe", _sentinel)
 

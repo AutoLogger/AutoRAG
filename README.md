@@ -10,14 +10,17 @@ Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic
 # Install full stack (audio + diarization + RAG + server + YouTube download)
 uv sync --all-extras
 
-# Transcribe a local audio file using Ollama (no API key needed)
+# Transcribe a local audio file (saves word spans to SQLite)
 autorag transcribe session.webm
 
+# Run the full pipeline: Whisper + LLM topics + Chroma embeddings
+autorag generate-topics session.webm
+
 # …or a YouTube URL — yt-dlp downloads the audio to a temp .webm first
-autorag transcribe https://www.youtube.com/watch?v=dQw4w9WgXcQ
+autorag generate-topics https://www.youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
-Output is a JSON list of topics printed to stdout. Timing info goes to stderr. The database is written to `~/.autorag/autorag.db` by default.
+`generate-topics` prints the persisted topic JSON to stdout; timing info goes to stderr. The database is written to `~/.autorag/autorag.db` by default.
 
 ## Install as a library
 
@@ -25,13 +28,13 @@ AutoRAG is also a pip-installable SDK. Install from a tagged release on GitHub:
 
 ```bash
 # Audio → topics agent only (Whisper + diarization)
-pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.2"
+pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.4.0"
 
 # Add YouTube URL support (yt-dlp)
-pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.2"
+pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.4.0"
 
 # Full stack (also installs Chroma + UMAP + FastAPI)
-pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.2"
+pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.4.0"
 ```
 
 ```python
@@ -39,18 +42,20 @@ from autorag import AutoRAG
 
 rag = AutoRAG()
 
-# Local file
-result = rag.transcribe("meeting.wav")
+# Step 1: Whisper + diarization → word spans
+words = rag.transcribe("meeting.wav")
+# Or a YouTube URL (requires [youtube] extra):
+words = rag.transcribe("https://youtu.be/dQw4w9WgXcQ")
 
-# Or a YouTube URL — downloaded to a temp .webm for the call's duration.
-# Requires the [youtube] extra.
-result = rag.transcribe("https://youtu.be/dQw4w9WgXcQ")
+# Step 2: LLM topic extraction (requires [audio,diarize] for LangChain/Ollama)
+topics = rag.generate_topics(words)
+print(topics["topics"])           # hierarchical topic tree (L0/L1/L2)
 
-print(result["topics"])           # hierarchical topic tree
-print(result["transcription"])    # word-level spans with speaker labels
+# Step 3a: persist word spans to SQLite (requires [rag] extra)
+rag.persist_transcription("meeting.wav", words, title="Weekly sync")
 
-# Optional: persist to SQLite + index topic embeddings (requires [rag] extra)
-rag.persist_transcription("meeting.wav", result, title="Weekly sync")
+# Step 3b: persist topic tree + embed titles into Chroma (requires [rag] extra)
+rag.persist_topics("meeting.wav", topics, words=words, title="Weekly sync")
 ```
 
 ### Extras
@@ -104,28 +109,44 @@ autorag transcribe SOURCE [OPTIONS]
                                 (youtube.com / youtu.be / m.youtube.com / music.youtube.com)
   --title            -t  TEXT   Clip title (defaults to YouTube video title for URLs, else filename stem / video id)
   --whisper-model    -w  TEXT   Whisper model: tiny/base/small/medium/large  [default: base]
+  --language         -l  TEXT   Whisper language code (auto-detect if empty)
+  --persist/--no-persist        Write word spans to SQLite (default: true)
+  --db                   PATH   Override database path
+```
+
+Runs Whisper + diarization and outputs word spans as JSON on stdout. With `--persist` (default), the word spans are written to SQLite. Session IDs are stable: local paths map to UUID5 of the resolved path; YouTube URLs collapse to a canonical `https://www.youtube.com/watch?v=<id>` form. For LLM topic extraction, use `autorag generate-topics`.
+
+### `autorag generate-topics`
+
+```
+autorag generate-topics SOURCE [OPTIONS]
+
+  SOURCE                        Audio file path or YouTube URL
+  --title            -t  TEXT   Clip title
+  --whisper-model    -w  TEXT   Whisper model  [default: base]
   --provider         -p  TEXT   LLM provider (ollama)  [default: ollama]
   --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
   --language         -l  TEXT   Whisper language code (auto-detect if empty)
-  --db                   PATH  Override database path
+  --transcription    -T  TEXT   Pre-computed word spans as a JSON string (skip Whisper)
+  --persist/--no-persist        Write transcription + topics to SQLite/Chroma (default: true)
+  --db                   PATH   Override database path
 ```
 
-For local files, the same path always maps to the same session ID (UUID5 of its resolved path), so re-runs overwrite the same row. YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires the `[youtube]` extra) and the session ID is seeded from the canonical `https://www.youtube.com/watch?v=<id>` URL — `youtu.be/X`, `m.youtube.com/watch?v=X`, and `www.youtube.com/watch?v=X` all collapse to the same row. The stored row's `title`, `created_at`, and `file_path` are populated from yt-dlp's info dict (video title, upload date as midnight UTC, canonical URL) instead of the now-deleted temp file. After topics are stored, topic-title embeddings are computed via Ollama and written to a persistent Chroma collection (alongside the SQLite db) for use by `/viz`.
-
-Timing breakdown is printed to stderr after each run:
+Full pipeline: transcribes (or reads from SQLite cache / `--transcription`), runs the five-stage LLM topic extraction, and persists everything (word spans + topic tree + Chroma embeddings). Outputs the persisted topic JSON to stdout; timing breakdown goes to stderr:
 
 ```
-=== Transcription Timing Breakdown ===
+=== Topic Generation Timing Breakdown ===
+  whisper           12.341s
   agent             21.842s
   cli_store_words    0.003s
   cli_finalize       0.005s
   cli_embed          0.231s
-  ───────────────────────────
-  TOTAL             22.081s
+  ────────────────────────────────────
+  TOTAL             34.422s
   device: cuda
 ```
 
-The `agent` stage covers Whisper transcription plus all five LLM passes (L1 boundaries, subdivide decisions, L2 boundaries, per-node summarization, L0 aggregation).
+The `agent` stage covers all five LLM passes (L1 boundaries, subdivide decisions, L2 boundaries, per-node summarization, L0 aggregation). YouTube URLs are downloaded to a temp `.webm` (via yt-dlp, requires `[youtube]`); `title`, `created_at`, and `file_path` are populated from yt-dlp's info dict.
 
 ### `autorag blocks`
 
@@ -232,17 +253,16 @@ Word-level timestamps from Whisper, flattened to absolute offsets from audio sta
 
 ```json
 [
-  {"w": " Hello", "s": 0.0, "e": 0.4, "abs_s": 0.0, "speaker": "0"},
-  {"w": " world", "s": 0.4, "e": 0.8, "abs_s": 0.4, "speaker": "1"}
+  {"w": " Hello", "s": 0.0, "e": 0.4, "speaker": "0"},
+  {"w": " world", "s": 0.4, "e": 0.8, "speaker": "1"}
 ]
 ```
 
 | Field     | Description                                                                                            |
 |-----------|--------------------------------------------------------------------------------------------------------|
 | `w`       | Word token (may include leading space)                                                                 |
-| `s`       | Segment-relative start time (seconds)                                                                  |
-| `e`       | Segment-relative end time (seconds)                                                                    |
-| `abs_s`   | Absolute start offset from audio start (seconds)                                                       |
+| `s`       | Start time (seconds from audio start)                                                                  |
+| `e`       | End time (seconds from audio start)                                                                    |
 | `speaker` | Speaker label `"0"`, `"1"`, … normalized in first-appearance order. `"0"` when diarization is disabled. |
 
 ### `topics` column

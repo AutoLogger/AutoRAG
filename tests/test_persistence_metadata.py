@@ -38,8 +38,8 @@ def _make_audio_file(parent: Path) -> Path:
 def _result() -> dict[str, Any]:
     return {
         "transcription": [
-            {"w": "hello", "s": 0.0, "e": 0.5, "abs_s": 0.0, "speaker": "0"},
-            {"w": "world", "s": 0.5, "e": 1.0, "abs_s": 0.5, "speaker": "0"},
+            {"w": "hello", "s": 0.0, "e": 0.5, "speaker": "0"},
+            {"w": "world", "s": 0.5, "e": 1.0, "speaker": "0"},
         ],
         "topics": {
             "topics": [
@@ -71,7 +71,7 @@ def test_youtube_metadata_anchors_created_at_and_file_path(
 
     out = autorag_no_embed.persist_transcription(
         audio,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
         source_url=url,
         upload_date="20091025",
@@ -92,7 +92,7 @@ def test_persist_without_metadata_keeps_legacy_behavior(
 
     out = autorag_no_embed.persist_transcription(
         audio,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
     )
 

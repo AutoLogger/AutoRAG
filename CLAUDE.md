@@ -21,25 +21,29 @@ Always use `uv`, never `pip` directly:
 
 `AutoRAG` is the single public class. Flat methods, lazy imports for heavy deps:
 
-| Method                   | Extras needed     | Purpose                                       |
-|--------------------------|-------------------|-----------------------------------------------|
-| `transcribe(file, ...)`  | `[audio,diarize]` (+ `[youtube]` for URLs) | Whisper + LLM topic tree → `TranscriptionResult`. `file` is a local path **or** a YouTube URL (downloaded to a temp `.webm` via `autorag.audio_source.resolve_audio_input`) |
-| `build_agent(**kwargs)`  | `[audio,diarize]` | Returns the LangChain `Runnable` directly     |
-| `transcribe_blocks(file, seconds=10, ...)` | `[rag]` cache hit; `[audio,diarize]` (+ `[youtube]`) on miss | Returns the transcript as N-second time blocks (one `MM:SS-MM:SS Speaker K: ...` line per speaker turn). Reads from the SQLite cache when present (via `persistence.derive_session_id` + `load_transcription`), else runs `transcribe` + `persist_transcription` first |
-| `persist_transcription(file, result, ...)` | `[rag]` | Writes clip + words + events to SQLite, indexes topic embeddings in Chroma |
-| `ingest(paths)`          | base              | Document RAG: load → chunk → embed → store    |
-| `query(question, ...)`   | base              | Retrieve + generate over ingested corpus      |
+| Method                              | Extras needed     | Purpose                                       |
+|-------------------------------------|-------------------|-----------------------------------------------|
+| `transcribe(file, ...)`             | `[audio,diarize]` (+ `[youtube]` for URLs) | Whisper + diarization → `list[WordSpan]`. `file` is a local path **or** a YouTube URL (downloaded to a temp `.webm` via `autorag.audio_source.resolve_audio_input`) |
+| `generate_topics(words, ...)`       | `[audio,diarize]` | LLM topic extraction on pre-computed `list[WordSpan]` → `TopicTree` |
+| `build_agent(**kwargs)`             | `[audio,diarize]` | Returns the LangChain `Runnable[Path\|str, TranscriptionResult]` directly |
+| `transcribe_blocks(file, seconds=10, ...)` | `[rag]` cache hit; `[audio,diarize]` (+ `[youtube]`) on miss | Returns the transcript as N-second time blocks. Reads from SQLite cache when present, else runs `transcribe` + `persist_transcription` first |
+| `persist_transcription(file, words, ...)` | `[rag]` | Writes clip row + word spans to SQLite |
+| `persist_topics(file, topics, ...)` | `[rag]` | Writes topic tree to SQLite + indexes topic embeddings in Chroma |
+| `ingest(paths)`                     | base              | Document RAG: load → chunk → embed → store    |
+| `query(question, ...)`              | base              | Retrieve + generate over ingested corpus      |
 
 `MissingExtraError` and `_missing_extra` live in `src/autorag/errors.py` (`core.py` re-exports `MissingExtraError` for backwards compat). Each audio/RAG method does `from autorag.X import ...` *inside the method body* and re-raises `ModuleNotFoundError` as `MissingExtraError` with a friendly extras hint. **Do not move these imports to module-top** — base install (`pip install autorag`) must boot without `chromadb`/`torch`/`whisper`/`pyannote`/`yt_dlp` installed. The CI `test-base` job enforces this.
 
 ### Audio → transcript + topics agent
 
 `src/autorag/agent.py` is the single audio→topics pipeline. Public surface:
-`transcribe(file, **kwargs) -> TranscriptionResult` and `build_agent(**kwargs)`,
-returning `{transcription, topics}` where `topics = {"topics": [L0]}` and `L0`
-is a root node whose `children` are the L1 topics (each with optional `L2`
-`children`). Most callers should use `AutoRAG.transcribe()` instead of importing
-this module directly — the facade handles the lazy-import / extras-error story.
+`transcribe_audio(file, **kwargs) -> list[WordSpan]` (Whisper + diarize only),
+`generate_topics(words, **kwargs) -> TopicTree` (pure LLM, no audio),
+`build_topic_runnable(**kwargs) -> Runnable[list[WordSpan], TopicTree]` (LangChain),
+and `build_agent(**kwargs) -> Runnable[Path|str, TranscriptionResult]` (Whisper
++ topics combined). Most callers should use the `AutoRAG` facade (`transcribe`,
+`generate_topics`) instead of importing this module directly — the facade handles
+the lazy-import / extras-error story.
 
 Multi-pass L0/L1/L2 with boundary detection separated from summarization.
 Stages: L1 boundaries (1 call) → decide subdivide on plain text (per long L1) →

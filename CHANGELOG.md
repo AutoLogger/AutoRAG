@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-11
+
+### Added
+- `AutoRAG.generate_topics(words, ...)` → `TopicTree`: pure LLM topic extraction
+  on pre-computed `list[WordSpan]`, no audio involved.
+- `AutoRAG.persist_topics(file, topics, ...)`: stores the topic tree to SQLite
+  and embeds topic titles into Chroma. Call after `persist_transcription`.
+- `build_topic_runnable()` in `agent.py` — LangChain
+  `Runnable[list[WordSpan], TopicTree]` (Whisper-free; `build_agent` wraps it).
+- `agent.transcribe_audio(file)` → `list[WordSpan]` and
+  `agent.generate_topics(words)` → `TopicTree` as standalone module-level
+  helpers (lower-level alternatives to the `AutoRAG` facade).
+- `autorag generate-topics` CLI command: transcribes (or reads from cache),
+  generates LLM topics, and persists transcription + topics + embeddings.
+
+### Changed
+- `AutoRAG.transcribe()` now returns `list[WordSpan]` instead of
+  `TranscriptionResult`; call `generate_topics()` separately for the LLM topic
+  tree.
+- `AutoRAG.persist_transcription()` now stores word spans only; call
+  `persist_topics()` to persist the topic tree and Chroma embeddings.
+- `autorag transcribe` CLI now only transcribes and persists word spans (no LLM
+  topic generation). Use `autorag generate-topics` for the full pipeline.
+
+### Removed
+- `abs_s` field removed from `WordSpan` dict construction in `agent.py`
+  (was redundant with `s` and was never declared in the `WordSpan` TypedDict).
+
 ## [0.3.3] - 2026-05-11
 
 ### Fixed
@@ -98,7 +126,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.0...v0.3.1

@@ -39,8 +39,8 @@ def _make_audio_file(parent: Path) -> Path:
 def _result() -> dict[str, Any]:
     return {
         "transcription": [
-            {"w": "hello", "s": 0.0, "e": 0.5, "abs_s": 0.0, "speaker": "0"},
-            {"w": "world", "s": 0.5, "e": 1.0, "abs_s": 0.5, "speaker": "0"},
+            {"w": "hello", "s": 0.0, "e": 0.5, "speaker": "0"},
+            {"w": "world", "s": 0.5, "e": 1.0, "speaker": "0"},
         ],
         "topics": {
             "topics": [
@@ -75,13 +75,13 @@ def test_session_id_stable_across_calls_for_same_youtube_url(
 
     out_a = autorag_no_embed.persist_transcription(
         audio_a,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
         source_url=url_a,
     )
     out_b = autorag_no_embed.persist_transcription(
         audio_b,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
         source_url=url_b,
     )
@@ -100,7 +100,7 @@ def test_session_id_falls_back_to_path_when_no_source_url(
 
     out = autorag_no_embed.persist_transcription(
         audio,
-        _result(),  # type: ignore[arg-type]
+        _result()["transcription"],
         db_path=db_path,
     )
 

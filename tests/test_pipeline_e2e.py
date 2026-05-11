@@ -154,12 +154,12 @@ def test_fox_new_full_pipeline() -> None:
 def test_youtube_url_full_pipeline() -> None:
     from autorag import AutoRAG
 
-    result = AutoRAG().transcribe(_YT_URL, llm_model=OLLAMA_MODEL)
-
-    spans = result["transcription"]
+    rag = AutoRAG()
+    spans = rag.transcribe(_YT_URL)
     assert spans, "transcription is empty"
 
-    topics_root = result["topics"]["topics"]
+    topics_result = rag.generate_topics(spans, llm_model=OLLAMA_MODEL)
+    topics_root = topics_result["topics"]
     assert len(topics_root) == 1, f"expected 1 L0 root, got {len(topics_root)}"
 
     for w in spans:
