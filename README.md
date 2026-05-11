@@ -25,13 +25,13 @@ AutoRAG is also a pip-installable SDK. Install from a tagged release on GitHub:
 
 ```bash
 # Audio → topics agent only (Whisper + diarization)
-pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.1"
+pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.2"
 
 # Add YouTube URL support (yt-dlp)
-pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.1"
+pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.2"
 
 # Full stack (also installs Chroma + UMAP + FastAPI)
-pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.1"
+pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.2"
 ```
 
 ```python

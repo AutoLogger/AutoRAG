@@ -1,8 +1,15 @@
+import { useVizData } from "./hooks/useVizData";
+import { Overlays } from "./ui/Overlays";
+import { Rail } from "./ui/Rail";
+
 export function App(): JSX.Element {
-  return (
-    <div id="loading-overlay" className="overlay visible">
-      <div className="overlay-icon" />
-      <div className="overlay-text">loading visualization…</div>
-    </div>
-  )
+	const { data, loading, error, empty } = useVizData();
+	const showRail = !!data && !empty && !error;
+
+	return (
+		<>
+			<Overlays loading={loading} empty={empty} error={error} />
+			{showRail && <Rail data={data} />}
+		</>
+	);
 }
