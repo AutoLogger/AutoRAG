@@ -28,3 +28,6 @@ data/
 *.webm
 
 .claude/settings.local.json
+
+node_modules/
+*.tsbuildinfo
