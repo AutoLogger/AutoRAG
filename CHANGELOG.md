@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-10
+
+### Changed
+- `/viz` is now served from a Vite-built React + TypeScript bundle under
+  `src/autorag/static/viz/index.html`, mounted alongside a new `/viz-assets`
+  static route. Source lives in the new top-level `frontend/` directory
+  (outside `src/autorag/` so `uv`/`ruff`/`mypy` don't scan TypeScript).
+  Phase A: scaffold + FastAPI wiring only — the existing Three.js scene is
+  preserved in `viz.html` and will be ported to `react-three-fiber` in
+  subsequent commits.
+
 ## [0.3.0] - 2026-05-10
 
 ### Added
@@ -68,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AutoLogger/AutoRAG/releases/tag/v0.2.0

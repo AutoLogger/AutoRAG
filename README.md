@@ -25,13 +25,13 @@ AutoRAG is also a pip-installable SDK. Install from a tagged release on GitHub:
 
 ```bash
 # Audio → topics agent only (Whisper + diarization)
-pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.0"
+pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.1"
 
 # Add YouTube URL support (yt-dlp)
-pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.0"
+pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.1"
 
 # Full stack (also installs Chroma + UMAP + FastAPI)
-pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.0"
+pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.1"
 ```
 
 ```python
@@ -65,6 +65,25 @@ rag.persist_transcription("meeting.wav", result, title="Weekly sync")
 | `all`      | everything above                             | …the full local-dev stack                             |
 
 `[diarize]` is meant to ride on top of `[audio]` — pyannote needs the same torch + ffmpeg stack. Install both together: `pip install 'autorag[audio,diarize]'`.
+
+### Frontend build (`/viz` page)
+
+`/viz` is served from a Vite-built React + TypeScript bundle. Source lives in
+`frontend/`; built output lives in `src/autorag/static/viz/` and is **committed
+to git** so the Python wheel and CI don't need a node toolchain.
+
+Rebuild after editing anything under `frontend/src/`:
+
+```bash
+cd frontend && npm install && npm run build
+```
+
+The build writes `index.html` + hashed `assets/*` into `src/autorag/static/viz/`
+(via `outDir` in `frontend/vite.config.ts`). `src/autorag/viz.py` serves the
+HTML at `/viz`; `src/autorag/api.py` mounts the assets dir at `/viz-assets`.
+For interactive development, `cd frontend && npm run dev` runs Vite on
+http://localhost:5173 with `/viz/data` and `/viz/search` proxied to a separately
+running `autorag serve` on port 8000.
 
 ### Releasing a new version
 
@@ -332,7 +351,8 @@ autorag serve
   └─ FastAPI
        ├─ /ingest  POST → core.AutoRAG.ingest()
        ├─ /query   POST → core.AutoRAG.query()
-       ├─ /viz          → viz.html (static)
+       ├─ /viz          → static/viz/index.html  (Vite-built React + TS bundle)
+       ├─ /viz-assets/* → static/viz/assets/*   (StaticFiles mount)
        ├─ /viz/data GET → viz.viz_data()
        │    ├─ db.list_clips()
        │    ├─ ChromaStore.get_clip_embeddings()  (per clip)

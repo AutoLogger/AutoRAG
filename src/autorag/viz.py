@@ -21,7 +21,9 @@ from autorag.topic_cluster import build_edges, cluster_embeddings
 
 router = APIRouter()
 
-_HTML_PATH = pathlib.Path(__file__).parent / "static" / "viz.html"
+_VIZ_DIR = pathlib.Path(__file__).parent / "static" / "viz"
+_HTML_PATH = _VIZ_DIR / "index.html"
+viz_assets_dir = _VIZ_DIR
 
 
 # ---------------------------------------------------------------------------

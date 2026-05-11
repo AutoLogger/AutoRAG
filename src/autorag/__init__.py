@@ -12,4 +12,4 @@ __all__ = [
     "WordSpan",
     "format_blocks",
 ]
-__version__ = "0.3.0"
+__version__ = "0.3.1"

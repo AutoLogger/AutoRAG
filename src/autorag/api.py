@@ -21,10 +21,14 @@ app = FastAPI(title="AutoRAG", version="0.2.0")
 # `[server]` users without `[rag]` get the API minus /viz.
 try:
     from autorag.viz import router as viz_router
+    from autorag.viz import viz_assets_dir
 except ModuleNotFoundError as exc:
     logger.info("viz endpoints disabled (install autorag[rag] to enable): %s", exc)
 else:
+    from fastapi.staticfiles import StaticFiles
+
     app.include_router(viz_router)
+    app.mount("/viz-assets", StaticFiles(directory=viz_assets_dir), name="viz-assets")
 
 
 @lru_cache(maxsize=1)

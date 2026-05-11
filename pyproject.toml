@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "autorag"
-version = "0.3.0"
+version = "0.3.1"
 description = "Audio→topics agent + document RAG toolkit. Importable SDK + CLI + HTTP API."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

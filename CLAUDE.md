@@ -178,6 +178,84 @@ Releases are made by bumping `__version__` in `src/autorag/__init__.py` and
 `version` in `pyproject.toml`, running `uv lock`, committing, then
 `git tag v0.x.0 && git push --tags`.
 
+## Frontend (`/viz` page)
+
+`/viz` is the project's only browser surface. As of v0.3.1 it is a
+Vite + React 18 + TypeScript + `@react-three/fiber` app, replacing the previous
+single-file vanilla-Three.js page.
+
+### Layout
+
+| Path                            | What                                                  |
+|---------------------------------|-------------------------------------------------------|
+| `frontend/`                     | Source — React/TS, not shipped to PyPI                |
+| `frontend/index.html`           | Vite entry                                            |
+| `frontend/vite.config.ts`       | `base: '/viz-assets/'` + `outDir: ../src/autorag/static/viz` |
+| `frontend/src/main.tsx`         | `ReactDOM.createRoot`                                 |
+| `frontend/src/App.tsx`          | Root component                                        |
+| `frontend/src/styles.css`       | Global CSS (ported from the old `viz.html`)           |
+| `frontend/src/api/`             | Hand-typed mirror of `src/autorag/viz.py` schemas + fetch wrappers |
+| `frontend/src/state/`           | Zustand store for cross-component scene state         |
+| `frontend/src/hooks/`           | `useVizData`, `useDebouncedSearch`                    |
+| `frontend/src/three/`           | r3f components — `Scene`, `PointsLayer`, etc.         |
+| `frontend/src/ui/`              | DOM components — `Rail`, `Legend`, `SearchBox`, `Tooltip`, etc. |
+| `src/autorag/static/viz/`       | **Committed build output.** `index.html` + hashed `assets/*` |
+
+`frontend/` lives outside `src/autorag/` so `uv` / `ruff` / `mypy` don't scan
+TypeScript. The build output lives **inside** the Python package so wheel
+packaging picks it up via the existing `static/` glob — no `MANIFEST.in`
+changes.
+
+### Build flow
+
+```bash
+cd frontend && npm install && npm run build
+```
+
+`tsc -b && vite build` runs the TypeScript project-references build for
+typecheck, then emits `index.html` + hashed `assets/index-<hash>.{js,css}`
+into `src/autorag/static/viz/` (Vite's `emptyOutDir: true` clears stale
+hashes). Commit the rebuilt bundle alongside any `frontend/src/` changes
+in the same commit so HTML, source, and assets never drift.
+
+For interactive iteration:
+
+```bash
+cd frontend && npm run dev    # Vite on http://localhost:5173
+```
+
+The dev server proxies `/viz/data` and `/viz/search` to a separately running
+`autorag serve` on port 8000 (see `server.proxy` in `vite.config.ts`).
+
+### FastAPI wiring
+
+- `src/autorag/viz.py` resolves `_VIZ_DIR = static/viz/`, serves
+  `_VIZ_DIR / "index.html"` at `GET /viz`, and exports `viz_assets_dir` for
+  the static mount.
+- `src/autorag/api.py` mounts the assets dir at `/viz-assets` *inside* the
+  existing `[rag]` `try/else`, so `[server]`-only installs (without `[rag]`)
+  skip both the viz endpoints and the assets mount.
+- `base: '/viz-assets/'` in `vite.config.ts` is load-bearing — it makes
+  built asset URLs (`<script src="/viz-assets/assets/index-<hash>.js">`)
+  match the mount.
+
+### CI / build decision
+
+**Built bundle is committed; CI does not run a node build.** Rationale:
+
+1. Python-only CI keeps passing with zero new infra.
+2. PyPI/git-installed wheels need the built assets anyway — they ship via the
+   existing `static/` glob.
+3. The viz changes infrequently relative to the Python backend.
+
+If a CI build is wanted later: add one GH Actions job with `setup-node@v4`
+running `npm ci && npm run build` in `frontend/`. Additive.
+
+### Version pinning
+
+Three.js and `@types/three` are pinned **exactly** (no `^`) — drei 9.x must
+move in lockstep with any Three bump. Current: `three@0.165.0`.
+
 ## Third-Party Stubs
 
 These packages have no stubs — covered by mypy `ignore_missing_imports` overrides:
