@@ -156,10 +156,11 @@ class AutoRAG:
         """
         try:
             from autorag.agent import generate_topics as _agent_generate_topics
+            from autorag.persistence import collapse_lone_children
         except ModuleNotFoundError as exc:
             raise _missing_extra("audio,diarize", exc) from exc
 
-        return _agent_generate_topics(
+        raw = _agent_generate_topics(
             words,
             llm_model=llm_model,
             ollama_base_url=ollama_base_url,
@@ -168,6 +169,7 @@ class AutoRAG:
             max_concurrency=max_concurrency,
             min_subdivide_duration_s=min_subdivide_duration_s,
         )
+        return collapse_lone_children(raw)
 
     def build_agent(self, **kwargs: Any) -> Runnable[Path | str, TranscriptionResult]:
         """Return the LangChain :class:`Runnable` for batched / streaming use.
@@ -342,7 +344,7 @@ class AutoRAG:
             from autorag.audio_source import is_youtube_url
             from autorag.chroma_store import ChromaStore, default_chroma_dir
             from autorag.db import Database
-            from autorag.persistence import collapse_lone_children, topics_to_events
+            from autorag.persistence import topics_to_events
         except ModuleNotFoundError as exc:
             raise _missing_extra("rag", exc) from exc
 
@@ -374,13 +376,11 @@ class AutoRAG:
         else:
             end_s = 0.0
 
-        topic_tree = collapse_lone_children(topics)
-
         t = time.perf_counter()
         pending_events = topics_to_events(
             db,
             session_id,
-            topic_tree,
+            topics,
             audio_start=audio_start,
             provider=provider,
             llm_model=llm_model,

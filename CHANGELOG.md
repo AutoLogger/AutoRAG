@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-11
+
+### Changed
+- `AutoRAG.generate_topics()` now applies `collapse_lone_children` before
+  returning, so callers always receive a normalized `TopicTree` regardless of
+  whether `persist_topics` is called. `persist_topics` no longer collapses the
+  tree itself.
+
+### Fixed
+- Suppress spurious pyannote `UserWarning` about `std()` degrees of freedom
+  from `StatsPool` on single-frame diarization segments; the warning was
+  harmless (pyannote handles the NaN internally) but polluted log output.
+
 ## [0.4.0] - 2026-05-11
 
 ### Added
@@ -126,7 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.1...v0.3.2

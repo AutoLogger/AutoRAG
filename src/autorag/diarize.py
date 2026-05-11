@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -245,7 +246,15 @@ def _run_diarization(pipeline: Any, audio_path: str) -> list[tuple[float, float,
     global _pipeline_device
     _ensure_pipeline_on_cuda(pipeline)
     try:
-        diarization = pipeline(audio_path)
+        with warnings.catch_warnings():
+            # pyannote's StatsPool calls std(correction=1) on single-frame segments
+            # (dof=0 → NaN), which it handles internally. Suppress the noise.
+            warnings.filterwarnings(
+                "ignore",
+                message=r"std\(\).*degrees of freedom",
+                category=UserWarning,
+            )
+            diarization = pipeline(audio_path)
     except Exception as exc:  # pragma: no cover - hardware-dependent
         if _is_cuda_error(exc) and not _cpu_pinned:
             logger.warning("pyannote CUDA failure on %s (%s); retrying on CPU.", audio_path, exc)
