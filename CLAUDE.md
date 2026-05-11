@@ -25,6 +25,7 @@ Always use `uv`, never `pip` directly:
 |--------------------------|-------------------|-----------------------------------------------|
 | `transcribe(file, ...)`  | `[audio,diarize]` (+ `[youtube]` for URLs) | Whisper + LLM topic tree → `TranscriptionResult`. `file` is a local path **or** a YouTube URL (downloaded to a temp `.webm` via `autorag.audio_source.resolve_audio_input`) |
 | `build_agent(**kwargs)`  | `[audio,diarize]` | Returns the LangChain `Runnable` directly     |
+| `transcribe_blocks(file, seconds=10, ...)` | `[rag]` cache hit; `[audio,diarize]` (+ `[youtube]`) on miss | Returns the transcript as N-second time blocks (one `MM:SS-MM:SS Speaker K: ...` line per speaker turn). Reads from the SQLite cache when present (via `persistence.derive_session_id` + `load_transcription`), else runs `transcribe` + `persist_transcription` first |
 | `persist_transcription(file, result, ...)` | `[rag]` | Writes clip + words + events to SQLite, indexes topic embeddings in Chroma |
 | `ingest(paths)`          | base              | Document RAG: load → chunk → embed → store    |
 | `query(question, ...)`   | base              | Retrieve + generate over ingested corpus      |
@@ -64,9 +65,33 @@ summary input emits `Speaker N: <words>` per turn so the LLM sees explicit
 turn-taking.
 
 The CLI (`cli.py`) calls `AutoRAG.transcribe()` then `AutoRAG.persist_transcription()`.
-Persistence helpers (`collapse_lone_children`, `iter_topics_flat`, `topics_to_events`)
-live in `src/autorag/persistence.py`. The 3-level traversal maps the agent's L0
-children → category `l1`, L1 children → `l2`, L2 children → `l3`.
+Persistence helpers (`collapse_lone_children`, `iter_topics_flat`, `topics_to_events`,
+`derive_session_id`, `load_transcription`) live in `src/autorag/persistence.py`.
+The first three are write-side; the latter two are base-safe readers used by
+`AutoRAG.transcribe_blocks` to short-circuit on a cache hit. The 3-level
+traversal maps the agent's L0 children → category `l1`, L1 children → `l2`,
+L2 children → `l3`.
+
+### Transcript block formatting (`blocks.py`)
+
+`src/autorag/blocks.py` is dependency-free (stdlib only) and re-exported as
+`from autorag import format_blocks`. `format_blocks(transcription, seconds)`
+buckets `WordSpan`s by `floor(s/seconds) * seconds`, then within each
+non-empty bucket coalesces consecutive same-speaker spans (via
+`group_by_speaker`) into one `MM:SS-MM:SS Speaker K: <words>` line per turn
+(K = `int(speaker) + 1`, 1-indexed display). Buckets are separated by a blank
+line; empty buckets are skipped. A turn that crosses a bucket boundary
+produces one line per bucket. `agent._format_transcript` re-uses
+`group_by_speaker` from this module so there is no duplicate definition.
+
+### `default_title_from` lives in `audio_source.py`
+
+`autorag.audio_source.default_title_from(source)` resolves a YouTube URL to
+its video id (or a local path to its file stem) and is used by both the CLI
+`transcribe`/`blocks` commands and `AutoRAG.transcribe_blocks` as the last
+fallback when neither a caller-supplied `--title` nor a yt-dlp-provided title
+is available. Was `cli._default_title_from` in 0.2.0; promoted to a public
+helper in 0.3.0 so the SDK doesn't have to import from `cli`.
 
 ### YouTube URL input (`audio_source.py`)
 

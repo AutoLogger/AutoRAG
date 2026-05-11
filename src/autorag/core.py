@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from autorag.blocks import format_blocks
 from autorag.config import Settings, get_settings
 from autorag.embed import Embedder
 from autorag.errors import MissingExtraError, _missing_extra
@@ -120,6 +121,84 @@ class AutoRAG:
         except ModuleNotFoundError as exc:
             raise _missing_extra("audio,diarize", exc) from exc
         return _agent_build(**kwargs)
+
+    def transcribe_blocks(
+        self,
+        file: Path | str,
+        seconds: int = 10,
+        *,
+        force_retranscribe: bool = False,
+        db_path: Path | None = None,
+        whisper_model: str = "base",
+        llm_model: str = "qwen2.5:14b-instruct-q8_0",
+        language: str | None = None,
+        title: str | None = None,
+        provider: str = "ollama",
+    ) -> str:
+        """Return the transcription formatted as N-second time blocks.
+
+        Resolution order:
+          1. ``session_id = derive_session_id(file)``.
+          2. If SQLite has a row for ``session_id`` with a non-null
+             ``transcription`` and ``force_retranscribe`` is False, decode
+             it and format — returns immediately (no ``[audio]`` needed).
+          3. Else run :meth:`transcribe` then :meth:`persist_transcription`
+             (matching the CLI ``transcribe`` command), then format the
+             freshly produced words.
+
+        Each non-empty bucket emits one line per speaker turn,
+        ``MM:SS-MM:SS Speaker K: <words>``. See
+        :func:`autorag.blocks.format_blocks` for the full algorithm.
+
+        Requires ``pip install 'autorag[rag]'`` for the cached path;
+        ``[audio,diarize]`` (+ ``[youtube]`` for URLs) on cache miss.
+        """
+        if seconds <= 0:
+            raise ValueError("seconds must be a positive integer")
+
+        try:
+            from autorag.audio_source import default_title_from
+            from autorag.db import Database
+            from autorag.persistence import derive_session_id, load_transcription
+        except ModuleNotFoundError as exc:
+            raise _missing_extra("rag", exc) from exc
+
+        session_id = derive_session_id(file)
+        resolved_db = (db_path or self.settings.db_path).expanduser()
+        db = Database(resolved_db)
+
+        if not force_retranscribe:
+            cached = load_transcription(db, session_id)
+            if cached is not None:
+                return format_blocks(cached, seconds)
+
+        try:
+            from autorag.audio_source import resolve_audio_input
+        except ModuleNotFoundError as exc:
+            raise _missing_extra("audio,diarize", exc) from exc
+
+        source_str = file if isinstance(file, str) else str(file)
+        with resolve_audio_input(file) as src:
+            result = self.transcribe(
+                src.path,
+                whisper_model=whisper_model,
+                llm_model=llm_model,
+                language=language,
+            )
+            resolved_title = title or src.title or default_title_from(source_str)
+            self.persist_transcription(
+                src.path,
+                result,
+                title=resolved_title,
+                provider=provider,
+                llm_model=llm_model,
+                whisper_model=whisper_model,
+                db_path=db_path,
+                source_url=src.source_url,
+                upload_date=src.upload_date,
+                duration_s=src.duration_s,
+            )
+        return format_blocks(result["transcription"], seconds)
 
     def persist_transcription(
         self,

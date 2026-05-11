@@ -34,6 +34,7 @@ from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
 from autorag import diarize, whisper_runner
+from autorag.blocks import group_by_speaker as _group_by_speaker
 from autorag.types import TopicDict, TopicTree, TranscriptionResult, WordSpan
 
 logger = logging.getLogger(__name__)
@@ -202,22 +203,6 @@ def _run_whisper(file: Path, *, model_size: str, language: str | None) -> list[W
             }
         )
     return spans
-
-
-def _group_by_speaker(spans: list[WordSpan]) -> list[tuple[str, list[WordSpan]]]:
-    """Walk spans in order; coalesce consecutive same-speaker runs.
-
-    Words missing a `speaker` key are treated as speaker "0", which keeps
-    single-speaker behavior identical to pre-diarization output.
-    """
-    groups: list[tuple[str, list[WordSpan]]] = []
-    for ws in spans:
-        speaker = str(ws.get("speaker", "0") or "0")
-        if groups and groups[-1][0] == speaker:
-            groups[-1][1].append(ws)
-        else:
-            groups.append((speaker, [ws]))
-    return groups
 
 
 def _format_transcript(spans: list[WordSpan]) -> str:

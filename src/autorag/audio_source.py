@@ -55,6 +55,21 @@ def is_youtube_url(value: str) -> bool:
     return host in _YOUTUBE_HOSTS
 
 
+def default_title_from(source: str) -> str:
+    """Derive a clip title from a local path or YouTube URL.
+
+    YouTube URLs resolve to the video id; local paths resolve to the file
+    stem. Used as a fallback when neither a caller-supplied title nor a
+    yt-dlp-provided title is available.
+    """
+    if is_youtube_url(source):
+        parsed = urllib.parse.urlparse(source)
+        qs = urllib.parse.parse_qs(parsed.query)
+        video_id = (qs.get("v", [""])[0] or parsed.path.lstrip("/")).strip("/")
+        return video_id or "youtube-clip"
+    return Path(source).stem
+
+
 def _canonical_youtube_url(url: str) -> str:
     """Return a normalized ``https://www.youtube.com/watch?v=<id>`` URL.
 

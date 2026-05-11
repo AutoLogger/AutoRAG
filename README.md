@@ -25,13 +25,13 @@ AutoRAG is also a pip-installable SDK. Install from a tagged release on GitHub:
 
 ```bash
 # Audio → topics agent only (Whisper + diarization)
-pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
+pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.0"
 
 # Add YouTube URL support (yt-dlp)
-pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
+pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.0"
 
 # Full stack (also installs Chroma + UMAP + FastAPI)
-pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.2.0"
+pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.3.0"
 ```
 
 ```python
@@ -107,6 +107,24 @@ Timing breakdown is printed to stderr after each run:
 ```
 
 The `agent` stage covers Whisper transcription plus all five LLM passes (L1 boundaries, subdivide decisions, L2 boundaries, per-node summarization, L0 aggregation).
+
+### `autorag blocks`
+
+```
+autorag blocks SOURCE [OPTIONS]
+
+  SOURCE                        Audio file path or YouTube URL
+  --seconds          -n  INT    Time-block window length in seconds  [default: 10]
+  --force-retranscribe          Re-run transcription even if cached
+  --title            -t  TEXT   Clip title (only used on cache miss)
+  --whisper-model    -w  TEXT   Whisper model  [default: base]
+  --provider         -p  TEXT   LLM provider  [default: ollama]
+  --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
+  --language         -l  TEXT   Whisper language code (auto-detect if empty)
+  --db                   PATH   Override database path
+```
+
+Prints the cached transcript as N-second time blocks, one `MM:SS-MM:SS Speaker K: ...` line per speaker turn within each block. Reads from SQLite when the source has been transcribed before (no `[audio]` extra needed for the cache hit); otherwise runs the full transcribe + persist pipeline first, then formats. Same SDK call: `AutoRAG.transcribe_blocks(source, seconds=10)`. The pure formatter is exposed as `from autorag import format_blocks` for callers who already have a `WordSpan` list in hand.
 
 ### `autorag ingest`
 

@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import time
-import urllib.parse
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 — typer needs the runtime type
 from typing import Any
 
 import typer
 
-from autorag.audio_source import is_youtube_url
+from autorag.audio_source import default_title_from
 from autorag.core import AutoRAG
 
 app = typer.Typer(help="AutoRAG — automated retrieval-augmented generation.")
@@ -39,16 +38,6 @@ def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> No
     import uvicorn
 
     uvicorn.run("autorag.api:app", host=host, port=port, reload=reload)
-
-
-def _default_title_from(source: str) -> str:
-    """Derive a clip title from a local path or YouTube URL."""
-    if is_youtube_url(source):
-        parsed = urllib.parse.urlparse(source)
-        qs = urllib.parse.parse_qs(parsed.query)
-        video_id = (qs.get("v", [""])[0] or parsed.path.lstrip("/")).strip("/")
-        return video_id or "youtube-clip"
-    return Path(source).stem
 
 
 @app.command()
@@ -98,7 +87,7 @@ def transcribe(
         )
         agent_secs = time.perf_counter() - t0
 
-        resolved_title = title or src.title or _default_title_from(source)
+        resolved_title = title or src.title or default_title_from(source)
 
         persisted = rag.persist_transcription(
             src.path,
@@ -146,6 +135,51 @@ def transcribe(
         typer.echo(json.dumps(json.loads(clip["topics"]), indent=2))
     else:
         typer.echo("[]")
+
+
+@app.command()
+def blocks(
+    source: str = typer.Argument(
+        ...,
+        help="Audio file path or YouTube URL (youtube.com / youtu.be / ...).",
+    ),
+    seconds: int = typer.Option(
+        10, "--seconds", "-n", min=1, help="Time-block window length in seconds."
+    ),
+    force_retranscribe: bool = typer.Option(
+        False,
+        "--force-retranscribe",
+        help="Re-run transcription even if a cached copy exists.",
+    ),
+    title: str | None = typer.Option(
+        None, "--title", "-t", help="Clip title (only used on cache miss)"
+    ),
+    db_override: Path | None = typer.Option(None, "--db", help="Override database path"),
+    whisper_model: str = typer.Option("base", "--whisper-model", "-w"),
+    provider: str = typer.Option("ollama", "--provider", "-p"),
+    llm_model: str = typer.Option("qwen2.5:14b-instruct-q8_0", "--llm-model", "-m"),
+    language: str = typer.Option(
+        "", "--language", "-l", help="Whisper language code (auto-detect if empty)"
+    ),
+) -> None:
+    """Print the transcription as N-second time blocks, one line per speaker turn.
+
+    Reads from the cached SQLite row when present; otherwise runs the full
+    transcribe + persist pipeline first.
+    """
+    rag = AutoRAG()
+    text = rag.transcribe_blocks(
+        source,
+        seconds=seconds,
+        force_retranscribe=force_retranscribe,
+        db_path=db_override,
+        whisper_model=whisper_model,
+        llm_model=llm_model,
+        language=language or None,
+        title=title,
+        provider=provider,
+    )
+    typer.echo(text)
 
 
 if __name__ == "__main__":

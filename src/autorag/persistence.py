@@ -6,8 +6,11 @@ Pure functions extracted from the CLI so the SDK's
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,9 +18,52 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from autorag.db import Database
-    from autorag.types import TopicDict, TopicTree
+    from autorag.types import TopicDict, TopicTree, WordSpan
 
 logger = logging.getLogger(__name__)
+
+
+def derive_session_id(file_or_url: str | Path) -> str:
+    """Compute the same ``session_id`` :meth:`AutoRAG.persist_transcription`
+    would write.
+
+    Mirrors the inline logic in :meth:`AutoRAG.persist_transcription`:
+      - YouTube URL → ``uuid5(NAMESPACE_URL, _canonical_youtube_url(url))``
+      - Local Path → ``uuid5(NAMESPACE_URL, str(path.resolve()))``
+
+    Only ``autorag.audio_source`` is imported (base-safe; ``yt_dlp`` stays
+    behind its own lazy import). Safe to call without ``[audio]``/``[rag]``.
+    """
+    from autorag.audio_source import _canonical_youtube_url, is_youtube_url
+
+    if isinstance(file_or_url, str) and is_youtube_url(file_or_url):
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, _canonical_youtube_url(file_or_url)))
+    path = Path(file_or_url)
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+
+
+def load_transcription(db: Database, session_id: str) -> list[WordSpan] | None:
+    """Return the stored word list for ``session_id``, or ``None`` if the row
+    is missing or has no transcription.
+
+    Parses the JSON string written by :meth:`Database.store_transcription`.
+    Reads via raw ``sqlite_utils`` (matching :meth:`Database.list_clips`)
+    so a freshly-opened :class:`Database` instance can read rows it didn't
+    write — ``pydantic_sqlite``'s model registry is in-memory only.
+    """
+    inner = db.db._db  # pyright: ignore[reportPrivateUsage]
+    try:
+        if "audio_clips" not in inner.table_names():
+            return None
+        rows = list(inner["audio_clips"].rows_where("id = ?", [session_id]))
+    except Exception:
+        return None
+    if not rows:
+        return None
+    raw = rows[0].get("transcription")
+    if raw is None:
+        return None
+    return list(json.loads(raw))
 
 
 def collapse_lone_children(tree: TopicTree) -> TopicTree:
