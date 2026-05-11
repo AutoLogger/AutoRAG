@@ -30,6 +30,7 @@ _PIPELINE_LOCK = threading.Lock()
 _PIPELINE: Any | None = None
 _PIPELINE_LOAD_ATTEMPTED = False
 _cpu_pinned = False  # set True after any CUDA failure for the process lifetime
+_pipeline_device: str = "cpu"  # tracks current device of _PIPELINE after load
 
 _MODEL_NAME = "pyannote/speaker-diarization-3.1"
 
@@ -122,6 +123,37 @@ def _pin_cpu(reason: str) -> None:
     _cpu_pinned = True
 
 
+def _ensure_pipeline_on_cuda(pipeline: Any) -> None:
+    """Re-move an offloaded pipeline back to CUDA before inference."""
+    global _pipeline_device
+    if _pipeline_device == "cuda" or _cpu_pinned or _device_preference() != "cuda":
+        return
+    try:
+        import torch
+
+        pipeline.to(torch.device("cuda"))
+        _pipeline_device = "cuda"
+        logger.debug("pyannote pipeline moved back to CUDA for inference.")
+    except Exception as exc:
+        _pin_cpu(str(exc))
+
+
+def _offload_pipeline(pipeline: Any) -> None:
+    """Move pipeline to CPU and free VRAM after inference completes."""
+    global _pipeline_device
+    if _pipeline_device != "cuda":
+        return
+    try:
+        import torch
+
+        pipeline.to(torch.device("cpu"))
+        torch.cuda.empty_cache()
+        _pipeline_device = "cpu"
+        logger.debug("pyannote pipeline offloaded to CPU; VRAM freed.")
+    except Exception as exc:
+        logger.debug("pyannote VRAM offload failed (%s); continuing.", exc)
+
+
 def _load_pipeline_on(device: str) -> Any | None:
     token = _hf_token()
     if not token:
@@ -157,6 +189,8 @@ def _load_pipeline_on(device: str) -> Any | None:
             import torch
 
             pipeline.to(torch.device("cuda"))
+            global _pipeline_device
+            _pipeline_device = "cuda"
         except Exception as exc:
             if _is_cuda_error(exc):
                 _pin_cpu(str(exc))
@@ -208,6 +242,8 @@ def diarize_file(file_path: str) -> list[tuple[float, float, str]]:
 
 
 def _run_diarization(pipeline: Any, audio_path: str) -> list[tuple[float, float, str]]:
+    global _pipeline_device
+    _ensure_pipeline_on_cuda(pipeline)
     try:
         diarization = pipeline(audio_path)
     except Exception as exc:  # pragma: no cover - hardware-dependent
@@ -218,6 +254,7 @@ def _run_diarization(pipeline: Any, audio_path: str) -> list[tuple[float, float,
                 import torch
 
                 pipeline.to(torch.device("cpu"))
+                _pipeline_device = "cpu"
                 diarization = pipeline(audio_path)
             except Exception as exc2:
                 logger.warning("pyannote CPU retry failed (%s); skipping diarization.", exc2)
@@ -239,7 +276,9 @@ def _run_diarization(pipeline: Any, audio_path: str) -> list[tuple[float, float,
         return []
 
     turns.sort(key=lambda t: t[0])
-    return _normalize_labels(turns)
+    result = _normalize_labels(turns)
+    _offload_pipeline(pipeline)
+    return result
 
 
 def _normalize_labels(

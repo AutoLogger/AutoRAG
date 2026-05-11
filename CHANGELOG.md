@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-11
+
+### Fixed
+- Whisper and pyannote pipeline VRAM is released immediately after inference:
+  `transcribe_segment` and `_run_diarization` now move their models to CPU and
+  call `torch.cuda.empty_cache()` so Ollama's LLM stages start with the GPU
+  unencumbered. Both modules restore to CUDA automatically on the next call.
+
 ## [0.3.2] - 2026-05-10
 
 ### Changed
@@ -90,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.2.0...v0.3.0

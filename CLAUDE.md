@@ -51,7 +51,10 @@ gives the K summary calls an identical prompt prefix for cache reuse.
 Default model `qwen2.5:14b-instruct-q8_0`.
 
 Whisper is invoked through `autorag.whisper_runner` (cached per (size, device),
-CUDA→CPU fallback on first failure). The Ollama base URL is resolved via
+CUDA→CPU fallback on first failure). After each `transcribe_segment` call the
+model is offloaded to CPU and VRAM freed via `torch.cuda.empty_cache()`; the
+next `get_model` call for the same size/device restores it to CUDA (cheap
+memory copy, no disk reload). The Ollama base URL is resolved via
 `AUTORAG_OLLAMA_BASE_URL` (falls back to `http://localhost:11434`).
 
 Speaker diarization runs via `autorag.diarize` using
@@ -59,7 +62,9 @@ Speaker diarization runs via `autorag.diarize` using
 `HF_TOKEN`. Each `WordSpan` carries a `speaker` field (`"0"`, `"1"`, …
 normalized in first-appearance order). Without a token (or on pyannote
 load/runtime failure) the agent logs a warning and labels every word
-`"0"` — output then matches pre-diarization behavior. `_format_transcript`
+`"0"` — output then matches pre-diarization behavior. After each
+`_run_diarization` call the pipeline is offloaded to CPU and VRAM freed;
+`_ensure_pipeline_on_cuda` restores it to CUDA on the next call. `_format_transcript`
 emits `[Speaker N]` headers above per-word timestamp lines; the per-node
 summary input emits `Speaker N: <words>` per turn so the LLM sees explicit
 turn-taking.

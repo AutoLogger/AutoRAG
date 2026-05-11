@@ -27,6 +27,7 @@ _MODEL_CACHE: dict[tuple[str, str], Any] = {}
 _cpu_pinned = False  # set True after any CUDA failure for the process lifetime
 _device_log_emitted = False
 _resolved_device: str | None = None
+_model_current_device: dict[int, str] = {}  # id(model) -> actual current device
 
 
 def _torch_cuda_available() -> bool:
@@ -109,10 +110,20 @@ def get_model(size: str, device_hint: str | None = None) -> Any:
             _device_log_emitted = True
         cached = _MODEL_CACHE.get(key)
         if cached is not None:
+            if device == "cuda" and _model_current_device.get(id(cached)) == "cpu":
+                try:
+                    import torch
+
+                    cached.to(torch.device("cuda"))
+                    _model_current_device[id(cached)] = "cuda"
+                    logger.debug("Whisper model restored to CUDA.")
+                except Exception as exc:
+                    _pin_cpu(str(exc))
             _resolved_device = device
             return cached
         model = _load_model_on(size, device)
         _MODEL_CACHE[key] = model
+        _model_current_device[id(model)] = device
         _resolved_device = device
         return model
 
@@ -183,7 +194,24 @@ def transcribe_segment(
             if not token.strip():
                 continue
             words_out.append({"w": token, "s": start, "e": end, "p": prob})
+    _offload_model_to_cpu(model)
     return words_out
+
+
+def _offload_model_to_cpu(model: Any) -> None:
+    """Move model to CPU and free VRAM; restored to CUDA on next get_model call."""
+    current = _model_current_device.get(id(model), _resolved_device or "cpu")
+    if current != "cuda":
+        return
+    try:
+        import torch
+
+        model.to(torch.device("cpu"))
+        torch.cuda.empty_cache()
+        _model_current_device[id(model)] = "cpu"
+        logger.debug("Whisper model offloaded to CPU; VRAM freed.")
+    except Exception as exc:
+        logger.debug("Whisper VRAM offload failed (%s); continuing.", exc)
 
 
 def _current_model_size(model: Any) -> str | None:
