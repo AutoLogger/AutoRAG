@@ -62,7 +62,7 @@ rag.persist_topics("meeting.wav", topics, words=words, title="Weekly sync")
 
 | Extra      | Adds                                         | Use when you want…                                  |
 |------------|----------------------------------------------|------------------------------------------------------|
-| `audio`    | openai-whisper, torch, imageio-ffmpeg        | …to call `rag.transcribe()` / `rag.build_agent()` |
+| `audio`    | whisperx, torch, imageio-ffmpeg              | …to call `rag.transcribe()` / `rag.build_agent()` |
 | `diarize`  | pyannote.audio, huggingface-hub              | …speaker labels (combine with `audio`)               |
 | `youtube`  | yt-dlp                                       | …to pass a YouTube URL to `rag.transcribe()` / `autorag transcribe` |
 | `rag`      | chromadb, umap-learn, scikit-learn, pydantic_sqlite, numpy | …`rag.persist_transcription()`, viz, or document RAG |

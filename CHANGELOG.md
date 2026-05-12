@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-12
+
+### Changed
+- Replaced `openai-whisper` with **whisperX** (faster-whisper / CTranslate2
+  backend + wav2vec2 forced-alignment pass). Transcription is ~4× faster and
+  word-level timestamps are frame-accurate rather than Whisper-estimated.
+  The `[audio]` extra now pulls `whisperx` instead of `openai-whisper`; the
+  public API (`AutoRAG.transcribe`, `WordSpan` shape) is unchanged.
+
 ## [0.5.0] - 2026-05-11
 
 ### Changed
@@ -139,7 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.2...v0.3.3

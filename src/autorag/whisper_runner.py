@@ -1,10 +1,10 @@
-"""Lazy-loaded Whisper model cache with CUDA-preferred / CPU-fallback device selection.
+"""Lazy-loaded whisperX model cache with CUDA-preferred / CPU-fallback device selection.
 
-The model cache is keyed by `(size, device)` and guarded by a module-level
-`threading.Lock`. We choose `cuda` when available (and not explicitly forced
-off by `AUTORAG_WHISPER_DEVICE=cpu`); on the first CUDA failure (OOM,
-driver mismatch, etc.) we catch it once, log a warning, reload on CPU, and
-pin the whole process to CPU for the rest of its lifetime.
+The main transcription model (CTranslate2 / faster-whisper backend) is removed
+from the module cache after each run so Python GC can free VRAM; the smaller
+wav2vec2 alignment model is offloaded to CPU after aligning and restored on the
+next call (PyTorch .to() round-trip).  Both are re-created from local HF cache
+on the next pipeline run, which is fast (<1 s for models already downloaded).
 """
 
 from __future__ import annotations
@@ -16,18 +16,16 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import whisper
-
 logger = logging.getLogger(__name__)
 
 # Module-level state -----------------------------------------------------------
 
 _MODEL_LOCK = threading.Lock()
-_MODEL_CACHE: dict[tuple[str, str], Any] = {}
-_cpu_pinned = False  # set True after any CUDA failure for the process lifetime
+_MODEL_CACHE: dict[tuple[str, str], Any] = {}  # (size, device) → whisperx model
+_ALIGN_CACHE: dict[tuple[str, str], tuple[Any, Any]] = {}  # (lang, device) → (align_model, meta)
+_cpu_pinned = False
 _device_log_emitted = False
 _resolved_device: str | None = None
-_model_current_device: dict[int, str] = {}  # id(model) -> actual current device
 
 
 def _torch_cuda_available() -> bool:
@@ -42,7 +40,7 @@ def _torch_cuda_available() -> bool:
 
 
 def _device_preference() -> str:
-    """Resolve the preferred device honoring `AUTORAG_WHISPER_DEVICE`."""
+    """Resolve the preferred device honoring ``AUTORAG_WHISPER_DEVICE``."""
     if _cpu_pinned:
         return "cpu"
     raw = os.environ.get("AUTORAG_WHISPER_DEVICE", "auto").strip().lower()
@@ -50,24 +48,20 @@ def _device_preference() -> str:
         return "cpu"
     if raw == "cuda":
         return "cuda" if _torch_cuda_available() else "cpu"
-    # "auto" or anything else
     return "cuda" if _torch_cuda_available() else "cpu"
 
 
 def _ensure_ffmpeg_on_path() -> None:
-    """Reuse audio_chunk_lab's ffmpeg resolution so Whisper's subprocess finds it."""
+    """Reuse imageio_ffmpeg's bundled binary so whisperX's subprocess finds it."""
     ff = shutil.which("ffmpeg")
     if not ff:
         try:
             import imageio_ffmpeg
 
-            exe = imageio_ffmpeg.get_ffmpeg_exe()
-            ff = str(exe)
+            ff = str(imageio_ffmpeg.get_ffmpeg_exe())
         except Exception:
             raise RuntimeError("missing ffmpeg") from None
-
-    ff_path = Path(ff)
-    ff_dir = str(ff_path.parent)
+    ff_dir = str(Path(ff).parent)
     current = os.environ.get("PATH", "")
     parts = current.split(os.pathsep) if current else []
     if ff_dir and ff_dir not in parts:
@@ -75,23 +69,28 @@ def _ensure_ffmpeg_on_path() -> None:
 
 
 def resolved_device() -> str:
-    """Return the device most recently used (or preferred if nothing loaded yet)."""
+    """Return the device most recently used (or the preference if nothing loaded yet)."""
     if _resolved_device is not None:
         return _resolved_device
     return _device_preference()
 
 
-def _load_model_on(size: str, device: str) -> Any:
+def _compute_type(device: str) -> str:
+    return "float16" if device == "cuda" else "int8"
 
-    logger.info("Loading Whisper model size=%s device=%s", size, device)
-    return whisper.load_model(size, device=device)
+
+def _load_model_on(size: str, device: str) -> Any:
+    import whisperx
+
+    compute = _compute_type(device)
+    logger.info("Loading whisperX model size=%s device=%s compute_type=%s", size, device, compute)
+    return whisperx.load_model(size, device, compute_type=compute)
 
 
 def get_model(size: str, device_hint: str | None = None) -> Any:
-    """Return a cached Whisper model for the given size.
+    """Return a cached whisperX model for *size*.
 
-    `device_hint` is advisory: if the process is already CPU-pinned because of
-    an earlier GPU failure, the hint is ignored.
+    ``device_hint`` is advisory: ignored when the process is already CPU-pinned.
     """
     global _device_log_emitted, _resolved_device
 
@@ -106,24 +105,14 @@ def get_model(size: str, device_hint: str | None = None) -> Any:
     key = (size, device)
     with _MODEL_LOCK:
         if not _device_log_emitted:
-            logger.info("Whisper device preference resolved to: %s", device)
+            logger.info("whisperX device preference resolved to: %s", device)
             _device_log_emitted = True
         cached = _MODEL_CACHE.get(key)
         if cached is not None:
-            if device == "cuda" and _model_current_device.get(id(cached)) == "cpu":
-                try:
-                    import torch
-
-                    cached.to(torch.device("cuda"))
-                    _model_current_device[id(cached)] = "cuda"
-                    logger.debug("Whisper model restored to CUDA.")
-                except Exception as exc:
-                    _pin_cpu(str(exc))
             _resolved_device = device
             return cached
         model = _load_model_on(size, device)
         _MODEL_CACHE[key] = model
-        _model_current_device[id(model)] = device
         _resolved_device = device
         return model
 
@@ -131,7 +120,7 @@ def get_model(size: str, device_hint: str | None = None) -> Any:
 def _pin_cpu(reason: str) -> None:
     global _cpu_pinned
     if not _cpu_pinned:
-        logger.warning("Pinning Whisper to CPU for remainder of process: %s", reason)
+        logger.warning("Pinning whisperX to CPU for remainder of process: %s", reason)
     _cpu_pinned = True
 
 
@@ -145,40 +134,114 @@ def _is_cuda_error(exc: BaseException) -> bool:
     return "nvml" in msg or ("driver" in msg and "cuda" in msg)
 
 
+def _get_align_model(language: str, device: str) -> tuple[Any, Any]:
+    """Return (align_model, metadata) for *language*, restoring from CPU cache when possible."""
+    key = (language, device)
+    with _MODEL_LOCK:
+        cached = _ALIGN_CACHE.get(key)
+        if cached is not None:
+            return cached
+        cpu_cached = _ALIGN_CACHE.get((language, "cpu"))
+
+    if device == "cuda" and cpu_cached is not None:
+        model_a, metadata = cpu_cached
+        try:
+            import torch
+
+            model_a.to(torch.device("cuda"))
+            with _MODEL_LOCK:
+                _ALIGN_CACHE[(language, "cuda")] = (model_a, metadata)
+                _ALIGN_CACHE.pop((language, "cpu"), None)
+            logger.debug("whisperX align model restored to CUDA.")
+            return model_a, metadata
+        except Exception as exc:
+            logger.warning("whisperX align model CUDA restore failed (%s); reloading.", exc)
+
+    import whisperx
+
+    logger.info("Loading whisperX align model language=%s device=%s", language, device)
+    model_a, metadata = whisperx.load_align_model(language_code=language, device=device)
+    with _MODEL_LOCK:
+        _ALIGN_CACHE[(language, device)] = (model_a, metadata)
+    return model_a, metadata
+
+
+def _offload_align_model(language: str) -> None:
+    """Move the wav2vec2 alignment model to CPU and free VRAM."""
+    try:
+        import torch
+
+        with _MODEL_LOCK:
+            cuda_key = (language, "cuda")
+            cached = _ALIGN_CACHE.get(cuda_key)
+            if cached is None:
+                return
+            model_a, metadata = cached
+            model_a.to(torch.device("cpu"))
+            _ALIGN_CACHE[(language, "cpu")] = (model_a, metadata)
+            del _ALIGN_CACHE[cuda_key]
+        torch.cuda.empty_cache()
+        logger.debug("whisperX align model offloaded to CPU; VRAM freed.")
+    except Exception as exc:
+        logger.debug("whisperX align model offload failed (%s); continuing.", exc)
+
+
 def transcribe_segment(
     model: Any,
     file_path: str,
     language: str | None,
 ) -> list[dict[str, Any]]:
-    """Transcribe a single audio file and return a flat list of word dicts.
+    """Transcribe *file_path* and return frame-aligned word dicts.
 
-    Each word dict is `{"w": str, "s": float, "e": float, "p": float}`.
-    `language=None` means auto-detect.
+    Each dict: ``{"w": str, "s": float, "e": float, "p": float}``.
+    The alignment pass uses wav2vec2 for frame-accurate word timestamps; if it
+    fails the unaligned faster-whisper timestamps are used as a fallback.
     """
-    kwargs: dict[str, Any] = {"word_timestamps": True}
+    import whisperx
+
+    _ensure_ffmpeg_on_path()
+    audio = whisperx.load_audio(file_path)
+    device = resolved_device() or "cpu"
+    batch_size = 16 if device == "cuda" else 4
+
+    transcribe_kwargs: dict[str, Any] = {"batch_size": batch_size}
     if language:
-        kwargs["language"] = language
+        transcribe_kwargs["language"] = language
 
     try:
-        result = model.transcribe(str(file_path), **kwargs)
+        result: dict[str, Any] = model.transcribe(audio, **transcribe_kwargs)
     except Exception as exc:  # pragma: no cover - hardware-dependent
         if _is_cuda_error(exc) and not _cpu_pinned:
             logger.warning(
-                "Whisper CUDA failure on %s (%s); reloading on CPU and retrying once.",
+                "whisperX CUDA failure on %s (%s); reloading on CPU and retrying once.",
                 file_path,
                 exc,
             )
             _pin_cpu(str(exc))
             size_guess = _current_model_size(model) or "base"
             cpu_model = get_model(size_guess, device_hint="cpu")
-            result = cpu_model.transcribe(str(file_path), **kwargs)
+            cpu_kwargs: dict[str, Any] = {"batch_size": 4}
+            if language:
+                cpu_kwargs["language"] = language
+            result = cpu_model.transcribe(audio, **cpu_kwargs)
+            model = cpu_model
+            device = "cpu"
         else:
             raise
 
+    detected_language: str = result.get("language") or language or "en"
+
+    try:
+        model_a, metadata = _get_align_model(detected_language, device)
+        aligned: dict[str, Any] = whisperx.align(
+            result["segments"], model_a, metadata, audio, device, return_char_alignments=False
+        )
+        segments: list[Any] = aligned.get("segments", result.get("segments", []))
+    except Exception as exc:
+        logger.warning("whisperX alignment failed (%s); using unaligned timestamps.", exc)
+        segments = result.get("segments", [])
+
     words_out: list[dict[str, Any]] = []
-    segments = result.get("segments") if isinstance(result, dict) else None
-    if not segments:
-        return words_out
     for seg in segments:
         raw_words = seg.get("words") if isinstance(seg, dict) else None
         if not raw_words:
@@ -186,38 +249,39 @@ def transcribe_segment(
         for w in raw_words:
             try:
                 token = str(w.get("word", "") or "")
-                start = float(w.get("start", 0.0) or 0.0)
-                end = float(w.get("end", start) or start)
-                prob = float(w.get("probability", w.get("prob", 0.0)) or 0.0)
+                start_raw = w.get("start")
+                end_raw = w.get("end")
+                # whisperX omits start/end for words it could not align — skip them.
+                if start_raw is None and end_raw is None:
+                    continue
+                start = float(start_raw or 0.0)
+                end = float(end_raw or start)
+                prob = float(w.get("score", w.get("probability", 0.0)) or 0.0)
             except (TypeError, ValueError):
                 continue
             if not token.strip():
                 continue
             words_out.append({"w": token, "s": start, "e": end, "p": prob})
-    _offload_model_to_cpu(model)
+
+    _offload_main_model(model)
+    _offload_align_model(detected_language)
     return words_out
 
 
-def _offload_model_to_cpu(model: Any) -> None:
-    """Move model to CPU and free VRAM; restored to CUDA on next get_model call."""
-    current = _model_current_device.get(id(model), _resolved_device or "cpu")
-    if current != "cuda":
-        return
-    try:
-        import torch
-
-        model.to(torch.device("cpu"))
-        torch.cuda.empty_cache()
-        _model_current_device[id(model)] = "cpu"
-        logger.debug("Whisper model offloaded to CPU; VRAM freed.")
-    except Exception as exc:
-        logger.debug("Whisper VRAM offload failed (%s); continuing.", exc)
+def _offload_main_model(model: Any) -> None:
+    """Remove the whisperX model from cache; CTranslate2 frees VRAM when the object is GC'd."""
+    with _MODEL_LOCK:
+        keys_to_del = [k for k, v in _MODEL_CACHE.items() if v is model]
+        for k in keys_to_del:
+            del _MODEL_CACHE[k]
+    if keys_to_del:
+        logger.debug("whisperX model removed from cache; VRAM freed on GC.")
 
 
 def _current_model_size(model: Any) -> str | None:
-    """Best-effort reverse lookup of a model's cache key for size."""
+    """Best-effort reverse lookup of a model's cache key for its size."""
     with _MODEL_LOCK:
-        for (size, _device), m in _MODEL_CACHE.items():
+        for (size, _), m in _MODEL_CACHE.items():
             if m is model:
                 return size
     return None

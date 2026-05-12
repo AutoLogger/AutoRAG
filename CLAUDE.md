@@ -54,11 +54,13 @@ The boundaries-vs-summaries split lets each call have one focused job and
 gives the K summary calls an identical prompt prefix for cache reuse.
 Default model `qwen2.5:14b-instruct-q8_0`.
 
-Whisper is invoked through `autorag.whisper_runner` (cached per (size, device),
-CUDA→CPU fallback on first failure). After each `transcribe_segment` call the
-model is offloaded to CPU and VRAM freed via `torch.cuda.empty_cache()`; the
-next `get_model` call for the same size/device restores it to CUDA (cheap
-memory copy, no disk reload). The Ollama base URL is resolved via
+Transcription is handled by `autorag.whisper_runner` via **whisperX**
+(faster-whisper / CTranslate2 backend + wav2vec2 forced-alignment pass for
+frame-accurate word timestamps). After each `transcribe_segment` call the main
+CTranslate2 model is removed from the module cache so Python GC can free VRAM;
+the smaller wav2vec2 alignment model is offloaded to CPU (PyTorch `.to()`) and
+restored on the next call. CUDA→CPU fallback on first CUDA error. The Ollama
+base URL is resolved via
 `AUTORAG_OLLAMA_BASE_URL` (falls back to `http://localhost:11434`).
 
 Speaker diarization runs via `autorag.diarize` using
@@ -168,13 +170,13 @@ Other settings:
 - Pydantic v2 `BaseModel` for API schemas; `SettingsConfigDict` for config.
 - `TypedDict` lives in `src/autorag/types.py` (dep-free) so SDK consumers can reference `WordSpan`, `TopicDict`, `TopicTree`, `TranscriptionResult` without importing langchain/whisper. New public typed-dicts go here, not in `agent.py`.
 - `numpy.typing.NDArray[np.float64]` for numpy array return types (see `viz.umap_3d`).
-- **Heavy deps stay lazy.** Base install (`pip install autorag`) only has typer + pydantic + langchain-{core,ollama}. Anything that imports `chromadb` / `torch` / `whisper` / `pyannote` / `umap` / `sklearn` / `pydantic_sqlite` belongs behind a method-body `import` in `core.py` (or the appropriate extras-gated module). When adding a new public method, decide which extra it needs and follow the existing `MissingExtraError` pattern.
+- **Heavy deps stay lazy.** Base install (`pip install autorag`) only has typer + pydantic + langchain-{core,ollama}. Anything that imports `chromadb` / `torch` / `whisperx` / `faster_whisper` / `pyannote` / `umap` / `sklearn` / `pydantic_sqlite` belongs behind a method-body `import` in `core.py` (or the appropriate extras-gated module). When adding a new public method, decide which extra it needs and follow the existing `MissingExtraError` pattern.
 
 ### Packaging (`pyproject.toml`)
 
 | Extra      | Modules that import it                                  | Adds                                  |
 |------------|---------------------------------------------------------|---------------------------------------|
-| `audio`    | `whisper_runner.py`, `agent.py` (whisper)               | openai-whisper, torch, imageio-ffmpeg |
+| `audio`    | `whisper_runner.py`, `agent.py` (whisper)               | whisperx, torch, imageio-ffmpeg       |
 | `diarize`  | `diarize.py`                                            | pyannote.audio, huggingface-hub       |
 | `youtube`  | `audio_source.py` (lazy in `_download_youtube_audio`)   | yt-dlp                                |
 | `rag`      | `chroma_store.py`, `db.py`, `viz.py`, `topic_cluster.py`| chromadb, umap-learn, scikit-learn, numpy, pydantic_sqlite |
@@ -268,7 +270,7 @@ move in lockstep with any Three bump. Current: `three@0.165.0`.
 ## Third-Party Stubs
 
 These packages have no stubs — covered by mypy `ignore_missing_imports` overrides:
-- `whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`, `chromadb`, `pyannote`, `yt_dlp`
+- `whisperx`, `faster_whisper`, `umap`, `pydantic_sqlite`, `imageio_ffmpeg`, `chromadb`, `pyannote`, `yt_dlp`
 
 `langchain-ollama` and `langchain-core` ship inline types and need no mypy overrides.
 

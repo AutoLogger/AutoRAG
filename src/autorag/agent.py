@@ -183,9 +183,8 @@ def _ollama_base_url() -> str:
 def _run_whisper(file: Path, *, model_size: str, language: str | None) -> list[WordSpan]:
     if not file.exists():
         raise FileNotFoundError(f"audio file not found: {file}")
-    model = whisper_runner.get_model(model_size)
+    model = whisper_runner.get_model(model_size, device_hint="cuda")
     raw_words = whisper_runner.transcribe_segment(model, str(file), language)
-
     turns = diarize.diarize_file(str(file))
     labels = diarize.assign_speakers(raw_words, turns)
 
