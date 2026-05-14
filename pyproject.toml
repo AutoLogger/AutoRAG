@@ -59,6 +59,12 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+docs = [
+    "sphinx>=7.3",
+    "furo>=2024.5.6",
+    "sphinx-autodoc-typehints>=2.0",
+    "myst-parser>=3.0",
+]
 
 [tool.uv_build]
 module-name = "autorag"
