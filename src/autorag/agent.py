@@ -1,6 +1,6 @@
 """Audio → hierarchical topic tree. The single agent for AutoRAG.
 
-Multi-pass L0 / L1 / L2 extractor — each LLM stage has one focused job:
+Multi-pass L0 / L1 / L2 extractor — each LLM stage has one focused job::
 
     1. Whisper                              -> list[WordSpan]               1 call
     2. L1 boundaries  (single LLM call)     -> list[{s,e}]                  1 LLM
@@ -9,13 +9,13 @@ Multi-pass L0 / L1 / L2 extractor — each LLM stage has one focused job:
     4. Summarize nodes  (per L1+L2, batched)-> {title,summary} per node     K LLM
     5. L0 aggregate                         -> {title, summary}             1 LLM
 
-Final shape: `{"topics": [L0]}` with `L0.children = [L1...]`, each
-`L1.children = [L2...]` or `[]`. The L0 root is the explicit "what is this
-audio about" node.
+Final shape: ``{"topics": [L0]}`` with ``L0.children = [L1...]``, each
+``L1.children = [L2...]`` or ``[]``. The L0 root is the explicit "what is
+this audio about" node.
 
-Boundary calls emit only `{s, e}` from the timestamped transcript; per-node
+Boundary calls emit only ``{s, e}`` from the timestamped transcript; per-node
 summary calls operate on the slice's plain text (no timestamps) and emit
-`{title, summary}`. The K=N1+N2 summary calls share an identical prompt
+``{title, summary}``. The K=N1+N2 summary calls share an identical prompt
 prefix for cache reuse.
 """
 

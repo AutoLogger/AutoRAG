@@ -83,6 +83,16 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
 napoleon_include_private_with_doc = False
 
+# sphinx-autodoc-typehints inspects Pydantic-internal signatures (Field,
+# JsonValue) when documenting subclasses of BaseModel; those references
+# can't be resolved from our environment. Squelch the noise without
+# hiding genuine forward-reference errors in our own code.
+always_document_param_types = True
+typehints_fully_qualified = False
+suppress_warnings = [
+    "sphinx_autodoc_typehints.forward_reference",
+]
+
 # --- intersphinx ---------------------------------------------------------
 
 intersphinx_mapping = {
