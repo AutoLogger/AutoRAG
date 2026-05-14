@@ -32,6 +32,8 @@ viz_assets_dir = _VIZ_DIR
 
 
 class TopicPoint(BaseModel):
+    """One topic node placed in 3-D space by the UMAP projection."""
+
     topic_title: str
     clip_id: str
     clip_title: str
@@ -47,12 +49,16 @@ class TopicPoint(BaseModel):
 
 
 class Edge(BaseModel):
+    """A similarity edge between two :class:`TopicPoint` indices."""
+
     a: int
     b: int
     similarity: float
 
 
 class VizData(BaseModel):
+    """Payload returned by ``GET /viz/data`` — points, edges, clip metadata."""
+
     points: list[TopicPoint]
     clip_ids: list[str]
     clip_titles: dict[str, str]
@@ -63,6 +69,8 @@ class VizData(BaseModel):
 
 
 class SearchResult(BaseModel):
+    """One hit returned by ``GET /viz/search``."""
+
     point_index: int
     topic_title: str
     clip_title: str
@@ -77,6 +85,11 @@ class SearchResult(BaseModel):
 
 
 def umap_3d(embeddings: list[list[float]]) -> npt.NDArray[np.float64]:
+    """Project N-D embeddings down to 3 columns with cosine UMAP.
+
+    Handles the small-N degenerate cases (n == 1 → all zeros; n < 4 →
+    pad to three columns) so the page can render the very first clip.
+    """
     emb = np.array(embeddings, dtype=np.float64)
     n = len(emb)
     if n == 1:
@@ -188,6 +201,7 @@ def _collect_rows_embeddings(
 
 @router.get("/viz", response_class=HTMLResponse, include_in_schema=False)
 def viz_page() -> HTMLResponse:
+    """Serve the React/r3f single-page app at ``GET /viz``."""
     return HTMLResponse(_HTML_PATH.read_text(encoding="utf-8"))
 
 
@@ -195,6 +209,13 @@ def viz_page() -> HTMLResponse:
 def viz_data(
     distance_threshold: float = Query(default=0.35, ge=0.0, le=1.0),
 ) -> VizData:
+    """Return the full :class:`VizData` payload for the ``/viz`` page.
+
+    Pulls every clip + topic from SQLite, fills missing embeddings via
+    Ollama (and caches them in Chroma), runs the 3-D UMAP projection,
+    and assembles cluster labels and similarity edges using
+    ``distance_threshold`` as the cluster cut.
+    """
     settings = get_settings()
     db_path = settings.db_path.expanduser()
     db = Database(db_path)
@@ -263,6 +284,12 @@ def viz_search(
     q: str = Query(..., min_length=1),
     top_k: int = Query(default=10, ge=1, le=100),
 ) -> list[SearchResult]:
+    """Return the ``top_k`` topics whose embedding is closest to ``q``.
+
+    Embeds the query with the same Ollama model used at ingest time and
+    runs the search inside Chroma. Hits that don't have a corresponding
+    point in the current viz dataset are skipped silently.
+    """
     q = q.strip()
     if not q:
         return []

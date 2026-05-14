@@ -1,3 +1,9 @@
+"""Persistent Chroma collection of per-clip topic embeddings.
+
+Backs the ``/viz`` page's search box and acts as a cache so the page
+load doesn't have to re-embed every topic on every request.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
@@ -58,6 +64,13 @@ class ChromaStore:
         topics: list[dict[str, Any]],
         embeddings: list[list[float]],
     ) -> None:
+        """Upsert one document + embedding per topic for ``clip_id``.
+
+        Ids use the ``"{clip_id}:{topic_index}"`` shape so the position
+        within a clip's filtered (title-bearing) topic list is the
+        stable key — matches what
+        :func:`autorag.viz._collect_rows_embeddings` reads back.
+        """
         if not topics:
             return
         if len(topics) != len(embeddings):
@@ -91,6 +104,7 @@ class ChromaStore:
         )
 
     def get_clip_embeddings(self, clip_id: str) -> dict[int, list[float]]:
+        """Return a ``topic_index -> embedding`` map for every cached topic."""
         result = self._collection.get(
             where={"clip_id": clip_id},
             include=["embeddings", "metadatas"],
@@ -107,6 +121,11 @@ class ChromaStore:
         return out
 
     def query(self, query_embedding: list[float], top_k: int) -> list[dict[str, Any]]:
+        """Return the ``top_k`` topics nearest ``query_embedding`` in cosine space.
+
+        Each returned dict carries the topic's clip/title/summary metadata
+        and a ``similarity`` field computed as ``1 - distance``.
+        """
         result = self._collection.query(
             query_embeddings=cast("Any", [query_embedding]),
             n_results=top_k,
@@ -131,7 +150,9 @@ class ChromaStore:
         return out
 
     def delete_clip(self, clip_id: str) -> None:
+        """Drop every topic row for ``clip_id`` from the collection."""
         self._collection.delete(where={"clip_id": clip_id})
 
     def count(self) -> int:
+        """Return the total number of topic rows in the collection."""
         return int(self._collection.count())
