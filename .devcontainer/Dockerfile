@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install curl gnupg -y \
   && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
   && apt-get update \
   && apt-get install google-chrome-stable -y --no-install-recommends
-  
+
 # Install basic development tools and iptables/ipset
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
@@ -70,26 +70,26 @@ RUN mkdir /commandhistory \
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude \
-      /home/node/.cache/uv \
-      /home/node/.local/share \
-      /home/node/.config/google-chrome \
-      /home/node/.config/matplotlib \
-      /home/node/.autorag \
-      /etc/opt/chrome/policies/managed \
-      /etc/opt/chrome/policies/recommended \
-      /home/node/.npm \
-      /run/user/1000 && \
+RUN mkdir -p /workspace/autorag /home/node/.claude \
+  /home/node/.cache/uv \
+  /home/node/.local/share \
+  /home/node/.config/google-chrome \
+  /home/node/.config/matplotlib \
+  /home/node/.autorag \
+  /etc/opt/chrome/policies/managed \
+  /etc/opt/chrome/policies/recommended \
+  /home/node/.npm \
+  /run/user/1000 && \
   chown -R node:node /workspace /home/node/.claude \
-    /home/node/.cache /home/node/.local/share \
-    /home/node/.config/google-chrome \
-    /home/node/.config/matplotlib \
-    /home/node/.autorag \
-    /home/node/.npm && \
+  /home/node/.cache /home/node/.local/share \
+  /home/node/.config/google-chrome \
+  /home/node/.config/matplotlib \
+  /home/node/.autorag \
+  /home/node/.npm && \
   chown -R node:node /etc/opt/chrome/policies && \
   chown node:node /run/user/1000 && chmod 700 /run/user/1000
 
-WORKDIR /workspace
+WORKDIR /workspace/autorag
 
 ARG GIT_DELTA_VERSION=0.18.2
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -137,19 +137,19 @@ USER node
 
 # Add launch-chrome helper (native Wayland + NVIDIA ANGLE/OpenGL GPU acceleration)
 RUN { \
-    echo ''; \
-    echo 'launch-chrome() {'; \
-    echo '    dbus-run-session -- google-chrome-stable \'; \
-    echo '        --ozone-platform=wayland \'; \
-    echo '        --enable-features=UseOzonePlatform,WaylandWindowDecorations \'; \
-    echo '        --use-gl=angle \'; \
-    echo '        --use-angle=opengl \'; \
-    echo '        --enable-gpu-rasterization \'; \
-    echo '        --enable-zero-copy \'; \
-    echo '        --ignore-gpu-blocklist \'; \
-    echo '        --disable-dev-shm-usage \'; \
-    echo '        --no-sandbox \'; \
-    echo '        --disable-setuid-sandbox \'; \
-    echo '        "$@" &'; \
-    echo '}'; \
+  echo ''; \
+  echo 'launch-chrome() {'; \
+  echo '    dbus-run-session -- google-chrome-stable \'; \
+  echo '        --ozone-platform=wayland \'; \
+  echo '        --enable-features=UseOzonePlatform,WaylandWindowDecorations \'; \
+  echo '        --use-gl=angle \'; \
+  echo '        --use-angle=opengl \'; \
+  echo '        --enable-gpu-rasterization \'; \
+  echo '        --enable-zero-copy \'; \
+  echo '        --ignore-gpu-blocklist \'; \
+  echo '        --disable-dev-shm-usage \'; \
+  echo '        --no-sandbox \'; \
+  echo '        --disable-setuid-sandbox \'; \
+  echo '        "$@" &'; \
+  echo '}'; \
   } >> ~/.bashrc

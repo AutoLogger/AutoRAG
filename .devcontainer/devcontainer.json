@@ -33,7 +33,7 @@
   "remoteUser": "node",
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=claude-code,target=/home/node/.claude,type=volume",
     "source=autorag-${devcontainerId},target=/home/node/.autorag,type=volume",
     "source=uv-cache,target=/home/node/.cache/uv,type=volume",
     "source=npm-cache,target=/home/node/.npm,type=volume",
@@ -68,9 +68,9 @@
     "UV_LINK_MODE": "copy",
     "MPLCONFIGDIR": "/home/node/.config/matplotlib"
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace",
-  "postStartCommand": "cd /workspace && uv sync --all-extras && rm -f /home/node/.config/google-chrome/SingletonLock /home/node/.config/google-chrome/SingletonCookie /home/node/.config/google-chrome/SingletonSocket",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/autorag,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace/autorag",
+  "postStartCommand": "cd /workspace/autorag && uv sync --all-extras && rm -f /home/node/.config/google-chrome/SingletonLock /home/node/.config/google-chrome/SingletonCookie /home/node/.config/google-chrome/SingletonSocket",
   // "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
   "waitFor": "postStartCommand"
 }
