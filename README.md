@@ -4,6 +4,22 @@
 
 Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic outline with an LLM, and store everything in a local SQLite database. Includes a semantic visualization layer (UMAP 3-D scatter, agglomerative clustering, cosine-similarity search) and a RAG scaffold (ingest → embed → retrieve → generate) exposed via CLI and HTTP API.
 
+## Documentation
+
+Full docs live in [`docs/`](./docs) and build with Sphinx:
+
+```bash
+uv sync --group docs
+uv run make -C docs html
+# open docs/_build/html/index.html
+```
+
+The site includes a user guide (installation, quickstart, per-feature
+walkthroughs), an internals reference (architecture, extras model,
+audio pipeline design, Ollama tuning, frontend, packaging), and an
+autodoc-generated API reference for every module under
+`src/autorag/`.
+
 ## Quickstart
 
 ```bash
