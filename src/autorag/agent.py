@@ -13,10 +13,11 @@ Final shape: ``{"topics": [L0]}`` with ``L0.children = [L1...]``, each
 ``L1.children = [L2...]`` or ``[]``. The L0 root is the explicit "what is
 this audio about" node.
 
-Boundary calls emit only ``{s, e}`` from the timestamped transcript; per-node
-summary calls operate on the slice's plain text (no timestamps) and emit
-``{title, summary}``. The K=N1+N2 summary calls share an identical prompt
-prefix for cache reuse.
+Boundary calls receive a time-bucketed (``format_blocks``, 30s) transcript and
+emit ``{s, e}`` as ``MM:SS`` strings, which we parse back to float seconds here
+(never the LLM — no model-side arithmetic). Per-node summary calls operate on
+the slice's plain text (no timestamps) and emit ``{title, summary}``. The
+K=N1+N2 summary calls share an identical prompt prefix for cache reuse.
 """
 
 from __future__ import annotations
@@ -34,15 +35,26 @@ from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
 from autorag import diarize, whisper_runner
+from autorag.blocks import format_blocks, mmss
 from autorag.blocks import group_by_speaker as _group_by_speaker
 from autorag.types import TopicDict, TopicTree, TranscriptionResult, WordSpan
 
 logger = logging.getLogger(__name__)
 
+# Window size for the block-formatted transcript fed to the L1/L2 boundary
+# prompts. Smaller = more frequent MM:SS anchors (finer possible boundaries) at
+# the cost of more lines; 30s gives a fresh anchor at least twice a minute even
+# inside a long single-speaker monologue.
+_BOUNDARY_BLOCK_SECONDS = 30
+
 
 class _Boundary(BaseModel):
-    s: float
-    e: float
+    # `str`, not `float`, on purpose: the structured-output JSON schema is
+    # derived from these annotations, so a `float` here would instruct the
+    # model to emit numbers. We want it to copy the transcript's `MM:SS`
+    # markers verbatim; `_parse_ts` converts them to seconds before tiling.
+    s: str
+    e: str
 
 
 class _BoundaryList(BaseModel):
@@ -69,35 +81,34 @@ class _L0Summary(BaseModel):
 
 _L1_SYS = (
     "You are a topic boundary detector. You receive a recording's "
-    "word-level transcript (one word per line as 's=12.34 word') and "
-    "must split it into ordered, non-overlapping top-level (L1) topics "
-    "that TILE the audio from start to end.\n\n"
-    "Lines may be grouped under `[Speaker N]` headers when multiple "
-    "speakers are present. Speaker changes are useful evidence for "
-    "topic boundaries, but a single topic may span multiple speakers.\n\n"
+    "transcript as time-bucketed blocks: blocks are separated by blank "
+    "lines and every line is `MM:SS-MM:SS Speaker K: <words>` (the two "
+    "MM:SS values are that turn's start and end). You must split the "
+    "recording into ordered, non-overlapping top-level (L1) topics that "
+    "TILE the audio from start to end.\n\n"
+    "Speaker changes are useful evidence for topic boundaries, but a "
+    "single topic may span multiple speakers.\n\n"
     "Rules:\n"
     "1. Return ONLY intervals -- no titles, no summaries. Each item is "
-    '{{"s": <float>, "e": <float>}}.\n'
-    "2. The first topic's `s` equals 0.0 (or the audio start); the last "
-    "topic's `e` equals the audio end.\n"
+    '{{"s": "MM:SS", "e": "MM:SS"}}.\n'
+    "2. The first topic's `s` equals the first MM:SS in the transcript; "
+    "the last topic's `e` equals the last MM:SS in the transcript.\n"
     "3. Adjacent topics tile end-to-start: for siblings A then B, set "
     "B.s = A.e (no gaps, no overlap). Order siblings by time.\n"
     "4. Aim for roughly the suggested topic count -- it is calibrated to "
     "duration. Do NOT over-split into 15+ tiny topics; do NOT collapse "
     "into a single topic unless the audio is very short.\n"
     "5. Topics typically span tens to hundreds of seconds, not single "
-    "words.\n"
-    "6. Use timestamp values that come directly from the transcript "
-    "lines. Do not invent timestamps."
+    "lines.\n"
+    "6. Copy MM:SS values directly from the transcript's range markers. "
+    "Do not invent or reformat timestamps."
 )
 _L1_HUMAN = (
-    "Audio runs from 0.00 to {audio_e} seconds (~{duration_min:.1f} min). "
-    "Suggested topic count: ~{target_count}.\n\n"
-    "Time anchors (evenly-sampled words across the audio -- use these to "
-    "see the full duration and spread topics across it; do NOT cluster "
-    "topics near the start):\n"
-    "{anchors}\n\n"
-    "Full transcript (one word per line as 's=12.34 word'):\n{transcript}"
+    "Audio runs from 00:00 to {audio_e} (~{duration_min:.1f} min). "
+    "Suggested topic count: ~{target_count}. Spread topics across the "
+    "FULL duration; do NOT cluster them near the start.\n\n"
+    "Time-bucketed transcript (blocks separated by blank lines; each "
+    "line is `MM:SS-MM:SS Speaker K: <words>`):\n{transcript}"
 )
 
 _DECIDE_SYS = (
@@ -121,31 +132,31 @@ _DECIDE_HUMAN = (
 
 _L2_SYS = (
     "You are a topic boundary detector. You receive a SLICE of a longer "
-    "recording's word-level transcript (one word per line as "
-    "'s=12.34 word') and must split it into ordered, non-overlapping "
-    "subtopics that TILE the slice from start to end.\n\n"
-    "Lines may be grouped under `[Speaker N]` headers when multiple "
-    "speakers are present. Speaker changes are useful evidence for "
-    "subtopic boundaries, but a single subtopic may span multiple speakers.\n\n"
+    "recording's transcript as time-bucketed blocks: blocks are "
+    "separated by blank lines and every line is "
+    "`MM:SS-MM:SS Speaker K: <words>` (the two MM:SS values are that "
+    "turn's start and end). You must split the slice into ordered, "
+    "non-overlapping subtopics that TILE the slice from start to end.\n\n"
+    "Speaker changes are useful evidence for subtopic boundaries, but a "
+    "single subtopic may span multiple speakers.\n\n"
     "Rules:\n"
     "1. Return ONLY intervals -- no titles, no summaries. Each item is "
-    '{{"s": <float>, "e": <float>}}.\n'
+    '{{"s": "MM:SS", "e": "MM:SS"}}.\n'
     "2. The first subtopic's `s` equals the slice start; the last "
     "subtopic's `e` equals the slice end.\n"
     "3. Adjacent subtopics tile end-to-start: for siblings A then B, set "
     "B.s = A.e (no gaps, no overlap). Order by time.\n"
-    "4. Use timestamp values that come directly from the transcript "
-    "lines. Do not invent timestamps."
+    "4. Copy MM:SS values directly from the transcript's range markers. "
+    "Do not invent or reformat timestamps."
 )
 _L2_HUMAN = (
-    "Slice spans [{slice_s} to {slice_e}] seconds (~{duration_min:.1f} "
-    "min). Suggested subtopic count: ~{target_count}. Produce at least "
-    "2 subtopics that together tile the slice; if you genuinely cannot "
+    "Slice spans [{slice_s} to {slice_e}] (~{duration_min:.1f} min). "
+    "Suggested subtopic count: ~{target_count}. Produce at least 2 "
+    "subtopics that together tile the slice; if you genuinely cannot "
     "find 2 distinct subjects, return exactly 2 anyway by splitting on "
     "the clearest natural break.\n\n"
-    "Time anchors (evenly-sampled words across the slice):\n"
-    "{anchors}\n\n"
-    "Slice transcript (one word per line as 's=12.34 word'):\n{transcript}"
+    "Time-bucketed slice transcript (blocks separated by blank lines; "
+    "each line is `MM:SS-MM:SS Speaker K: <words>`):\n{transcript}"
 )
 
 _NODE_SUM_SYS = (
@@ -203,19 +214,28 @@ def _run_whisper(file: Path, *, model_size: str, language: str | None) -> list[W
     return spans
 
 
-def _format_transcript(spans: list[WordSpan]) -> str:
-    out: list[str] = []
-    for speaker, group in _group_by_speaker(spans):
-        any_token = False
-        for ws in group:
-            token = str(ws.get("w", "")).strip()
-            if not token:
-                continue
-            if not any_token:
-                out.append(f"[Speaker {speaker}]")
-                any_token = True
-            out.append(f"s={float(ws.get('s', 0.0)):.2f} {token}")
-    return "\n".join(out)
+def _parse_ts(value: str) -> float:
+    """Parse an ``MM:SS`` / ``H:MM:SS`` (or bare-number) timestamp to seconds.
+
+    The boundary LLM copies ``MM:SS`` markers straight from the block-formatted
+    transcript; we do the arithmetic here rather than trusting the model to.
+    Each ``:``-separated field is a base-60 digit, so minutes may exceed 59 for
+    long audio (``"120:00"`` -> 7200.0). A bare number passes through. Anything
+    unparseable returns ``0.0`` — ``_snap_tile`` / ``_drop_zero`` then repair
+    the degenerate node.
+    """
+    raw = str(value).strip()
+    if not raw:
+        return 0.0
+    try:
+        if ":" in raw:
+            total = 0.0
+            for part in raw.split(":"):
+                total = total * 60.0 + float(part)
+            return total
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _format_words_only(spans: list[WordSpan]) -> str:
@@ -233,22 +253,6 @@ def _format_children(children: list[TopicDict]) -> str:
         lines.append(f"- title: {c.get('title', '') or ''}")
         lines.append(f"  summary: {c.get('summary', '') or ''}")
     return "\n".join(lines)
-
-
-def _time_anchors(spans: list[WordSpan], n: int = 10) -> str:
-    real = [w for w in spans if str(w.get("w", "")).strip()]
-    if not real:
-        return "(empty slice)"
-    if len(real) <= n:
-        picked = real
-    else:
-        step = len(real) / n
-        picked = [real[min(len(real) - 1, int(i * step))] for i in range(n)]
-        if picked[-1] is not real[-1]:
-            picked.append(real[-1])
-    return "\n".join(
-        f"  t={float(w.get('s', 0.0)):.2f}s  {str(w.get('w', '')).strip()}" for w in picked
-    )
 
 
 def _slice_spans(spans: list[WordSpan], s: float, e: float) -> list[WordSpan]:
@@ -378,15 +382,14 @@ def build_topic_runnable(
             "_BoundaryList",
             l1_chain.invoke(
                 {
-                    "transcript": _format_transcript(spans),
-                    "anchors": _time_anchors(spans),
-                    "audio_e": f"{audio_e:.2f}",
+                    "transcript": format_blocks(spans, _BOUNDARY_BLOCK_SECONDS),
+                    "audio_e": mmss(audio_e),
                     "duration_min": audio_e / 60.0,
                     "target_count": _target_count(0.0, audio_e),
                 }
             ),
         )
-        nodes: list[TopicDict] = [_new_node(b.s, b.e) for b in result.topics]
+        nodes: list[TopicDict] = [_new_node(_parse_ts(b.s), _parse_ts(b.e)) for b in result.topics]
         _snap_tile(nodes, 0.0, audio_e)
         nodes = _drop_zero(nodes)
         if not nodes:
@@ -434,10 +437,9 @@ def build_topic_runnable(
             sliced = _slice_spans(spans, ls, le)
             inputs.append(
                 {
-                    "transcript": _format_transcript(sliced),
-                    "anchors": _time_anchors(sliced),
-                    "slice_s": f"{ls:.2f}",
-                    "slice_e": f"{le:.2f}",
+                    "transcript": format_blocks(sliced, _BOUNDARY_BLOCK_SECONDS),
+                    "slice_s": mmss(ls),
+                    "slice_e": mmss(le),
                     "duration_min": (le - ls) / 60.0,
                     "target_count": _target_count(ls, le),
                 }
@@ -447,7 +449,7 @@ def build_topic_runnable(
         for r, l1 in zip(results, yes_l1_nodes, strict=True):
             ls = float(l1.get("s", 0.0))
             le = float(l1.get("e", 0.0))
-            kids: list[TopicDict] = [_new_node(b.s, b.e) for b in r.topics]
+            kids: list[TopicDict] = [_new_node(_parse_ts(b.s), _parse_ts(b.e)) for b in r.topics]
             _snap_tile(kids, ls, le)
             kids = _drop_zero(kids)
             out.append(kids)

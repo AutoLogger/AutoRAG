@@ -21,11 +21,17 @@ Total LLM calls per clip: roughly
 ``2 + N1_long + N1_yes + N1 + N2_total`` — about 20 calls for a
 seven-minute clip.
 
-Boundary calls emit only ``{s, e}`` offsets from the timestamped
-transcript; per-node summary calls operate on the slice's plain text
-(no timestamps) and emit ``{title, summary}``. The ``K = N1 + N2``
-summary calls share an identical prompt prefix so Ollama's per-slot
-prefix cache pays once.
+Boundary calls receive the transcript as a time-bucketed view
+(:func:`autorag.blocks.format_blocks`, 30-second windows — one
+``MM:SS-MM:SS Speaker K: <words>`` line per turn instead of one
+timestamped line per word, which keeps the boundary prompts compact).
+They emit ``{s, e}`` as ``MM:SS`` strings copied straight from those
+range markers; :func:`autorag.agent._parse_ts` converts them back to
+float seconds before tiling — the model never does the arithmetic.
+Per-node summary calls operate on the slice's plain text (no
+timestamps) and emit ``{title, summary}``. The ``K = N1 + N2`` summary
+calls share an identical prompt prefix so Ollama's per-slot prefix
+cache pays once.
 
 Final shape: ``{"topics": [L0]}`` with ``L0.children = [L1...]``,
 each ``L1.children = [L2...]`` or ``[]``. The L0 root is the explicit
@@ -59,13 +65,13 @@ on a load / runtime failure), every word is labelled ``"0"`` and the
 agent logs a warning — output then matches pre-diarization behaviour.
 
 Each :data:`~autorag.types.WordSpan` carries a ``speaker`` field
-normalized to ``"0"``, ``"1"``, … in first-appearance order. The
-agent's per-node summary input emits ``Speaker N: <words>`` per turn
-so the LLM sees explicit turn-taking. The
-``_format_transcript`` helper inside the agent and
-:func:`autorag.blocks.format_blocks` share
+normalized to ``"0"``, ``"1"``, … in first-appearance order. Both
+transcript views the agent feeds the LLM build on
 :func:`autorag.blocks.group_by_speaker` to coalesce consecutive
-same-speaker spans into turns.
+same-speaker spans into turns: the boundary stages use
+:func:`autorag.blocks.format_blocks` (``MM:SS-MM:SS Speaker K:
+<words>``) and the per-node summary input uses ``Speaker N: <words>``,
+so the LLM always sees explicit turn-taking.
 
 After each ``_run_diarization`` call the pyannote pipeline is
 offloaded to CPU and VRAM freed; ``_ensure_pipeline_on_cuda`` restores

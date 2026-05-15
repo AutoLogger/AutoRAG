@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from autorag.types import WordSpan
 
-__all__ = ["format_blocks", "group_by_speaker"]
+__all__ = ["format_blocks", "group_by_speaker", "mmss"]
 
 
 def group_by_speaker(spans: list[WordSpan]) -> list[tuple[str, list[WordSpan]]]:
@@ -32,7 +32,12 @@ def group_by_speaker(spans: list[WordSpan]) -> list[tuple[str, list[WordSpan]]]:
     return groups
 
 
-def _mmss(t: float) -> str:
+def mmss(t: float) -> str:
+    """Format ``t`` seconds as ``MM:SS`` (minutes may exceed 99 for long audio).
+
+    Floors to whole seconds and clamps negatives to ``00:00``. Inverse of
+    :func:`autorag.agent._parse_ts` at second resolution.
+    """
     total = max(0, floor(t))
     return f"{total // 60:02d}:{total % 60:02d}"
 
@@ -97,7 +102,7 @@ def format_blocks(transcription: list[WordSpan], seconds: int) -> str:
             if not tokens or first_s is None or last_e is None:
                 continue
             lines.append(
-                f"{_mmss(first_s)}-{_mmss(last_e)} {_speaker_label(speaker)}: {' '.join(tokens)}"
+                f"{mmss(first_s)}-{mmss(last_e)} {_speaker_label(speaker)}: {' '.join(tokens)}"
             )
         if lines:
             block_texts.append("\n".join(lines))

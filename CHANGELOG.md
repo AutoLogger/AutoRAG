@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Hosted documentation at <https://autologger.github.io/AutoRAG/>, published
   to GitHub Pages on every push to `main` (`.github/workflows/docs.yml`).
+- `autorag.blocks.mmss(t)` — public `MM:SS` second-formatter (promoted from
+  the private `_mmss`), now exported in `autorag.blocks.__all__`.
+
+### Changed
+- The topic agent's L1/L2 boundary detection now feeds the LLM a 30-second
+  time-bucketed transcript via `blocks.format_blocks` (one
+  `MM:SS-MM:SS Speaker K: <words>` line per turn) instead of one timestamped
+  line per word, and the boundary LLM emits `MM:SS` offsets that
+  `agent._parse_ts` converts back to seconds in code. Cuts boundary-prompt
+  size sharply; `AutoRAG.generate_topics` / `build_agent` signatures and the
+  `Runnable[list[WordSpan], TopicTree]` contract are unchanged.
 
 ### Fixed
 - `IngestRequest` (`POST /ingest`) is no longer left "not fully defined":

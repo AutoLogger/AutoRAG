@@ -3,10 +3,12 @@ from __future__ import annotations
 from autorag.agent import (
     TopicDict,
     WordSpan,
+    _Boundary,
     _drop_zero,
-    _format_transcript,
     _format_words_only,
     _group_by_speaker,
+    _new_node,
+    _parse_ts,
     _slice_spans,
     _snap_tile,
     _target_count,
@@ -153,23 +155,37 @@ def test_group_by_speaker_missing_key_defaults_to_zero() -> None:
     assert groups[0][0] == "0"
 
 
-def test_format_transcript_multi_speaker_emits_speaker_headers() -> None:
-    spans: list[WordSpan] = [
-        {"w": "hello", "s": 0.00, "e": 0.40, "speaker": "0"},
-        {"w": "world", "s": 0.40, "e": 0.80, "speaker": "0"},
-        {"w": "hi", "s": 1.20, "e": 1.40, "speaker": "1"},
-    ]
-    out = _format_transcript(spans)
-    assert out == ("[Speaker 0]\ns=0.00 hello\ns=0.40 world\n[Speaker 1]\ns=1.20 hi")
+def test_parse_ts_mmss() -> None:
+    assert _parse_ts("00:00") == 0.0
+    assert _parse_ts("02:30") == 150.0
+    # Minutes may exceed 59 for long audio (format_blocks never rolls to hours).
+    assert _parse_ts("120:00") == 7200.0
 
 
-def test_format_transcript_single_speaker_one_header() -> None:
-    spans: list[WordSpan] = [
-        {"w": "a", "s": 0.0, "e": 0.5, "speaker": "0"},
-        {"w": "b", "s": 0.5, "e": 1.0, "speaker": "0"},
+def test_parse_ts_hmmss_and_bare_number() -> None:
+    assert _parse_ts("1:02:03") == 3723.0
+    assert _parse_ts("150") == 150.0
+    assert _parse_ts("150.5") == 150.5
+
+
+def test_parse_ts_unparseable_falls_back_to_zero() -> None:
+    # _snap_tile / _drop_zero repair the degenerate node downstream.
+    assert _parse_ts("garbage") == 0.0
+    assert _parse_ts("") == 0.0
+    assert _parse_ts("12:ab") == 0.0
+
+
+def test_l1_boundary_mmss_parsed_and_tiled() -> None:
+    # Mirrors the exact transform _extract_l1_boundaries applies to the LLM's
+    # structured output: MM:SS strings -> _parse_ts -> nodes -> snap/drop.
+    boundaries = [
+        _Boundary(s="00:00", e="02:30"),
+        _Boundary(s="02:30", e="05:00"),
     ]
-    out = _format_transcript(spans)
-    assert out == "[Speaker 0]\ns=0.00 a\ns=0.50 b"
+    nodes: list[TopicDict] = [_new_node(_parse_ts(b.s), _parse_ts(b.e)) for b in boundaries]
+    _snap_tile(nodes, 0.0, 300.0)
+    nodes = _drop_zero(nodes)
+    assert [(n["s"], n["e"]) for n in nodes] == [(0.0, 150.0), (150.0, 300.0)]
 
 
 def test_format_words_only_multi_speaker_per_line() -> None:
