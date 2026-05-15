@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Hosted documentation at <https://autologger.github.io/AutoRAG/>, published
+  to GitHub Pages on every push to `main` (`.github/workflows/docs.yml`).
+
+### Fixed
+- `IngestRequest` (`POST /ingest`) is no longer left "not fully defined":
+  `pathlib.Path` is imported at runtime again so Pydantic can resolve the
+  `paths` field. Restores `IngestRequest.model_rebuild()`, FastAPI OpenAPI
+  schema generation, and the Sphinx autodoc build.
+
 ## [0.6.0] - 2026-05-12
 
 ### Changed

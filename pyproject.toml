@@ -107,6 +107,13 @@ unfixable = [
 [tool.ruff.lint.isort]
 known-first-party = ["autorag"]
 
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic models resolve field annotations at runtime, so imports used only
+# in their annotations (e.g. `pathlib.Path` in schemas.py) must NOT be moved
+# into a TYPE_CHECKING block by TC003 — doing so leaves the model
+# "not fully defined" and breaks model_rebuild() / FastAPI schema gen / autodoc.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

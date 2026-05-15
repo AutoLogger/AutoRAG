@@ -1,0 +1,87 @@
+name: Docs
+
+# Build the Sphinx docs and publish them to GitHub Pages on every push to
+# main that can affect the rendered output. autodoc reads the package source,
+# so src/ and pyproject.toml (version + deps) are triggers alongside docs/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/autorag/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+# Scopes the official Pages deploy actions need: read the repo, mint an OIDC
+# token, and write the Pages deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time. Unlike CI, do NOT cancel an in-progress run
+# — interrupting actions/deploy-pages can leave the published site half-updated.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build docs (Sphinx)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.x"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Base + [docs] only, no extras. docs/conf.py's autodoc_mock_imports
+      # covers the extras-gated deps (torch/chromadb/whisperx/pyannote/...),
+      # so every module's API docs render from a base+docs install — the same
+      # contract the `test-base` job in ci.yml guards.
+      - name: Install base + docs deps (no extras)
+        run: uv sync --frozen --group docs
+
+      # `make -C docs strict` == `sphinx-build -W` (warnings are errors), the
+      # canonical build in CLAUDE.md. A broken API reference (e.g. an autodoc
+      # import failure) fails the deploy instead of silently shipping. Relax to
+      # `make -C docs html` if a third-party warning should not block publish.
+      - name: Build HTML (strict — warnings are errors)
+        run: uv run --frozen --group docs make -C docs strict
+
+      # Sphinx emits _static/ _sources/ _modules/. The artifact-based Pages
+      # deploy serves files as-is (no Jekyll), but .nojekyll makes the output
+      # safe even if the Pages source is ever switched to a branch.
+      - name: Disable Jekyll processing
+        run: touch docs/_build/html/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

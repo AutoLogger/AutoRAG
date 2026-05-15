@@ -265,16 +265,20 @@ uv run pytest
 
 ## Docs build
 
-Sphinx is local-only (no CI build):
+Local build:
 
 ```bash
 uv sync --group docs
 uv run make -C docs strict        # treats warnings as errors
 ```
 
+CI also builds and publishes the docs to **GitHub Pages** via `.github/workflows/docs.yml` (see CI Pipeline below). The Pages source must be set to "GitHub Actions" in repo Settings → Pages (one-time, UI-only).
+
 The `[docs]` extra (sphinx, furo, sphinx-autodoc-typehints, myst-parser) lives in `[dependency-groups]` rather than `[project.optional-dependencies]` so it doesn't appear in published wheels.
 
-`docs/conf.py` mirrors the runtime extras in `autodoc_mock_imports` so the strict docs build works from a base install too. **When you add a new extras-gated import, add it to that list as well** — same rule as the mypy overrides / pyright config.
+`docs/conf.py` mirrors the runtime extras in `autodoc_mock_imports` so the strict docs build works from a base+docs install too (no extras) — this is exactly what the Pages workflow installs. **When you add a new extras-gated import, add it to that list as well** — same rule as the mypy overrides / pyright config.
+
+Pydantic API-schema models (`schemas.py`) resolve field annotations at runtime, so imports used only in their annotations (e.g. `pathlib.Path`) must stay as **runtime** imports, never moved into a `TYPE_CHECKING` block. `[tool.ruff.lint.flake8-type-checking] runtime-evaluated-base-classes = ["pydantic.BaseModel"]` stops TC003 from auto-suggesting that move; doing it anyway leaves the model "not fully defined" and breaks `model_rebuild()` / FastAPI schema gen / the autodoc build.
 
 ## CI Pipeline
 
@@ -285,3 +289,5 @@ The `[docs]` extra (sphinx, furo, sphinx-autodoc-typehints, myst-parser) lives i
 - **SDK base install (no extras)** — `uv sync --frozen --no-dev` then asserts `from autorag import AutoRAG` boots and the SDK methods are callable. **This is the regression guard for the lazy-import contract** — if anyone re-introduces a `chromadb`/`torch`/`whisperx`/`pyannote`/`yt_dlp` import at module top in `core.py` / `embed.py` / `__init__.py` / `store.py` / `audio_source.py`, this job fails.
 
 The workflow uses `uv sync --frozen` (fails if `uv.lock` is out of sync with `pyproject.toml`). If you add or change dependencies, run `uv lock` locally before pushing.
+
+`.github/workflows/docs.yml` is a separate workflow: on push to `main` (path-filtered to `docs/**`, `src/autorag/**`, `pyproject.toml`, `uv.lock`, and the workflow itself) plus `workflow_dispatch`, it does `uv sync --frozen --group docs`, `make -C docs strict`, drops a `.nojekyll`, and publishes `docs/_build/html` to GitHub Pages with the official `upload-pages-artifact` / `deploy-pages` actions (build + deploy jobs, `concurrency: pages`, `cancel-in-progress: false`). It installs **base + docs only**, so it doubles as a second guard that the `autodoc_mock_imports` list stays complete. Requires Settings → Pages → Source = "GitHub Actions" (one-time, UI-only); served at `https://autologger.github.io/AutoRAG/`.

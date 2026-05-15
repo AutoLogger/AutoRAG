@@ -1,12 +1,17 @@
 # AutoRAG
 
 [![CI](https://github.com/AutoLogger/AutoRAG/actions/workflows/ci.yml/badge.svg)](https://github.com/AutoLogger/AutoRAG/actions/workflows/ci.yml)
+[![Docs](https://github.com/AutoLogger/AutoRAG/actions/workflows/docs.yml/badge.svg)](https://autologger.github.io/AutoRAG/)
 
 Transcribe audio files with Whisper, summarize into a 3-level hierarchical topic outline with an LLM, and store everything in a local SQLite database. Includes a semantic visualization layer (UMAP 3-D scatter, agglomerative clustering, cosine-similarity search) and a RAG scaffold (ingest → embed → retrieve → generate) exposed via CLI and HTTP API.
 
 ## Documentation
 
-Full docs live in [`docs/`](./docs) and build with Sphinx:
+📖 **Hosted docs: <https://autologger.github.io/AutoRAG/>** — built from `docs/`
+with Sphinx and published to GitHub Pages on every push to `main`
+(`.github/workflows/docs.yml`).
+
+To build the same site locally:
 
 ```bash
 uv sync --group docs
