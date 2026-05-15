@@ -64,41 +64,48 @@ At the end of an interactive session, kill the background pid you started. Do no
 
 ## 2. The `/viz` page
 
-`/viz` (mounted at `src/autorag/viz.py`, served via `src/autorag/static/viz.html`) is a 3D WebGL constellation: a left rail of DOM controls and a fullscreen `<canvas>`. CSS selectors only reach the rail and overlays — anything drawn on the canvas is unreachable from selectors.
+`/viz` is a **Vite + React 18 + `@react-three/fiber`** app (source in `frontend/src/`), built to `src/autorag/static/viz/index.html` + hashed `assets/*` and served by `src/autorag/viz.py` (`_HTML_PATH = static/viz/index.html`). There is **no `viz.html`** — that vanilla file was deleted; do not look for it. The page is a left rail of DOM controls plus a fullscreen r3f `<canvas>`. CSS selectors reach the rail, overlays, and tooltip; anything drawn in the WebGL scene is unreachable from selectors.
 
-### DOM-targetable IDs (verified against `viz.html`)
+### DOM-targetable selectors (verified against `frontend/src/ui/` + `three/Scene.tsx`)
+
+All `id`s below are hand-written in JSX (stable — no CSS-in-JS hashing). The big behavioral change from the old vanilla page: **`#rail` / `#stats` only exist once data has loaded** (the rail is conditionally mounted, see App.tsx `showScene = !!data && !empty && !error`), and **the canvas has no `id`** (r3f creates it).
 
 | Element | Selector | Notes |
 |---|---|---|
-| Search box | `#search-input` | text input, debounced ~300ms |
-| Search hit list | `#search-results .search-hit` | rendered after debounce settles |
-| Color-mode button | `#btn-color-mode` | toggles point coloring |
-| Edges button | `#btn-edges` | toggles edge visibility |
-| Topic list | `#topic-list` | populated after data load |
-| Stats line | `#stats` | shows `—` until loaded, then counts |
-| Legend | `#legend`, `#size-legend` | populated after data load |
-| Loading overlay | `#loading-overlay` | has class `visible` while loading |
-| Empty / error overlays | `#empty-overlay`, `#error-overlay` (`#error-msg`) | mutually exclusive states |
-| Tooltip | `#tooltip` (`#tt-title`, `#tt-meta`, `#tt-summary`) | follows pointer over canvas |
-| Rail | `#rail` | the whole 290px left column |
-| Canvas | `#canvas` | the WebGL surface |
+| Search box | `#search-input` | text input, debounced **~350ms** (`useDebouncedSearch`) |
+| Search hit list | `#search-results .search-hit` | button per hit; children `.search-hit-title`, `.search-hit-score` |
+| Color-mode button | `#btn-color-mode` | toggles point coloring; gains `.active` in cluster mode |
+| Edges button | `#btn-edges` | toggles edge visibility; gains `.active` when edges shown |
+| Topic list | `#topic-list` | rows `.topic-row`; hovered row gets `.topic-row.active` (rail↔scene sync) |
+| Stats line | `#stats` | **absent until loaded**, then `"<N> topics · <M> clips · <K> clusters"` (never `—`) |
+| Legend | `#legend`, `#size-legend` | mounted with the rail |
+| Loading overlay | `#loading-overlay` | always in DOM; gains class `visible` while `loading` |
+| Empty / error overlays | `#empty-overlay`, `#error-overlay` (`#error-msg`) | each gains `visible` in its state; mutually exclusive |
+| Tooltip | `#tooltip` | always in DOM; empty `<div id="tooltip"/>` until a point is hovered, then gains `visible` + inline position. Children are **classes**: `.tt-title`, `.tt-meta`, `.tt-summary` (`.tt-summary` only if the topic has a summary) |
+| Rail | `#rail` | the 290px left column; only mounted when the scene shows |
+| Canvas | `document.querySelector('canvas')` | **no `id`** — r3f `<Canvas>` (`three/Scene.tsx`), `position: fixed; inset: 0` |
 
-### Anything NOT in that table is on the canvas
+### Anything NOT in that table is in the WebGL scene
 
-Points, edges, the camera, the hover/raycast state, projected screen coordinates — all are held in **closure-scoped** JS variables inside `viz.html` (`data`, `scene`, `camera`, `renderer`, `focusPoint`, `runSearch`, `pointWorldPositions`). None are on `window`. Verify with `grep -n 'window\.' src/autorag/static/viz.html` — you'll only see `window.innerWidth`, `window.addEventListener`, `window.devicePixelRatio`.
+Points, edges, camera, raycast/hover state, projected screen coordinates — none are on `window`. Cross-component scene state (color mode, edges toggle, hover/focus index, search results) lives in a **closure-scoped Zustand store** (`frontend/src/state/vizStore.ts`); the camera/points/raycaster are closure-scoped inside r3f controller components. Nothing is exposed for `puppeteer_evaluate`. Verify with `grep -rn 'window\.\|__viz\|globalThis' frontend/src` — it returns nothing (no debug handle exists).
 
-So today: **DOM + screenshots only.** Don't try to read scene state from `puppeteer_evaluate` and don't waste time hunting for a hidden global.
+So today: **DOM + screenshots only.** Read state through the rail's DOM mirror (`#stats`, `#topic-list .topic-row.active`, `#tooltip.visible`), not from JS. Don't hunt for a hidden global.
 
 ### Navigation gate
 
-`puppeteer_navigate` resolves on `load`, but Three.js scene construction is async (the `/viz/data` fetch + WebGL buffer uploads). Screenshotting too early returns the loading overlay or an unrendered canvas. Always gate on:
+`puppeteer_navigate` resolves on `load`, but the React app then fetches `/viz/data` and r3f builds the scene asynchronously. Screenshotting too early returns the loading overlay or a bare canvas. The old `#stats !== '—'` trick is **dead** — `#stats` no longer exists until data loads. Gate on the scene actually being mounted:
 
 ```js
-!document.getElementById('loading-overlay').classList.contains('visible')
-  && document.getElementById('stats').textContent !== '—'
+// scene ready: data loaded, rail mounted, loading overlay gone, canvas present
+(!document.getElementById('loading-overlay').classList.contains('visible')
+  && document.getElementById('rail')
+  && document.querySelector('canvas'))
+// OR a terminal non-scene state you can also screenshot:
+|| document.getElementById('empty-overlay').classList.contains('visible')
+|| document.getElementById('error-overlay').classList.contains('visible')
 ```
 
-Poll via `puppeteer_evaluate` until both are true, then screenshot.
+Poll via `puppeteer_evaluate` until truthy, then screenshot. (If `canvas` never appears but `#rail` does, that's the WebGL-fail SceneBoundary state — see section 4.)
 
 ### Recipe — load + screenshot
 
@@ -106,39 +113,43 @@ Poll via `puppeteer_evaluate` until both are true, then screenshot.
 puppeteer_navigate(url="http://127.0.0.1:8000/viz")
 # poll until ready (loop up to ~10s):
 puppeteer_evaluate(script="
-  !document.getElementById('loading-overlay').classList.contains('visible')
-  && document.getElementById('stats').textContent !== '—'
+  (!document.getElementById('loading-overlay').classList.contains('visible')
+    && document.getElementById('rail') && document.querySelector('canvas'))
+  || document.getElementById('empty-overlay').classList.contains('visible')
+  || document.getElementById('error-overlay').classList.contains('visible')
 ")
-puppeteer_screenshot(name="viz-loaded")                 # whole page
+puppeteer_screenshot(name="viz-loaded")                  # whole page
 puppeteer_screenshot(name="viz-rail",   selector="#rail")
-puppeteer_screenshot(name="viz-canvas", selector="#canvas")
+puppeteer_screenshot(name="viz-canvas", selector="canvas")  # no #id — element selector
 ```
 
 ### Recipe — search end-to-end
 
 ```
 puppeteer_fill(selector="#search-input", value="attention")
-# wait ~350ms (debounce ~300ms + render):
+# wait ~400ms (debounce 350ms + fetch /viz/search + render):
 puppeteer_evaluate(script="
   document.querySelectorAll('#search-results .search-hit').length
 ")
-# click the top hit to invoke focusPoint(idx) internally:
+# click the top hit — onClick calls the Zustand setFocusIndex(point_index),
+# which the scene's FocusController watches to pan the camera to that point:
 puppeteer_click(selector="#search-results .search-hit:first-child")
 puppeteer_screenshot(name="viz-focused-attention")
 ```
 
 ### Upgrade path — canvas-state introspection (future, not required)
 
-If you ever need to assert on what's *drawn* (vs. what's in the rail), the minimum change is to expose a debug handle inside `viz.html`, behind a query param so production users don't pay a leaked-global cost:
+If you ever need to assert on what's *drawn* (vs. what's in the rail), the minimum change is to expose the Zustand store on `window` behind a debug query param, so production users don't pay a leaked-global cost:
 
-```js
-// inside viz.html, near the bottom of the module
-if (new URLSearchParams(location.search).get('debug') === '1') {
-  window.__viz = { data, scene, camera, renderer, focusPoint, runSearch, pointWorldPositions };
+```ts
+// frontend/src/main.tsx, after the store import
+import { useVizStore } from "./state/vizStore";
+if (new URLSearchParams(location.search).get("debug") === "1") {
+  (window as unknown as { __viz: typeof useVizStore }).__viz = useVizStore;
 }
 ```
 
-After that ships, `puppeteer_navigate("http://127.0.0.1:8000/viz?debug=1")` lets you do things like `window.__viz.data.points.length`, `window.__viz.focusPoint(7)`, or project `pointWorldPositions[i]` to screen coordinates for click testing. **Do not ship this as part of using the skill** — propose it as a separate small change when the user actually needs canvas introspection.
+After that ships and **the bundle is rebuilt and committed** (`cd frontend && npm run build` — the served page is the committed `static/viz/` build, not `frontend/src/`), `puppeteer_navigate("http://127.0.0.1:8000/viz?debug=1")` lets you read store state, e.g. `window.__viz.getState().focusIndex`, `window.__viz.getState().searchResults.length`, or drive it with `window.__viz.getState().setFocusIndex(7)`. Note this still doesn't expose the camera/points (closure-scoped in r3f controllers) — for that you'd additionally need a ref bridged out of `three/Scene.tsx`. **Do not ship this as part of using the skill** — propose it as a separate small change when the user actually needs scene introspection.
 
 ## 3. API + Swagger
 
@@ -213,13 +224,15 @@ If `/viz` is missing here, it's an extras problem, not a routing bug.
 
 ## 4. Common pitfalls (devcontainer + Chrome + WebGL + AutoRAG)
 
-- **Blank `/viz` canvas ≠ "didn't load".** With the GPU flags in `.mcp.json` (`--ignore-gpu-blocklist`, `--use-gl=angle`, `--use-angle=opengl`, `--enable-gpu-rasterization`), a solid-black canvas screenshot while `#stats` shows a topic count means **GPU init failed**, not page load. Diagnose:
+- **Blank `/viz` canvas ≠ "didn't load".** With the GPU flags in `.mcp.json` (`--ignore-gpu-blocklist`, `--use-gl=angle`, `--use-angle=opengl`, `--enable-gpu-rasterization`), a solid-black `<canvas>` screenshot while `#rail` is mounted and `#stats` shows a topic count means **GPU init failed**, not page load (`/viz/data` succeeded — the rail proves it). Diagnose:
   ```
   puppeteer_evaluate(script="!!document.createElement('canvas').getContext('webgl2')")
   puppeteer_navigate(url="chrome://gpu")
   puppeteer_screenshot(name="chrome-gpu")
   ```
   Then route to `~/.claude/skills/chrome-settings/SKILL.md` for flag/driver fixes.
+
+- **`#rail` present but NO `<canvas>` element = WebGL context couldn't be created at all** (distinct from a black canvas). r3f's `<Canvas>` throws synchronously; the `SceneBoundary` error boundary (`frontend/src/ui/SceneBoundary.tsx`) catches it and renders a plain text div — *"3D view unavailable — WebGL context could not be created. The topic list on the left still works."* — with **no id/class**. Detect with `document.querySelector('#rail') && !document.querySelector('canvas')`, or find the div by text. Headless/software-GL Chrome with swiftshader is known to land here in this devcontainer, so this is the expected failure mode when GPU forwarding is down — the rail + search + topic list still screenshot fine and remain the assertable surface.
 
 - **Navigate-then-screenshot race.** `puppeteer_navigate` resolves on `load`, but the viz fetches `/viz/data` and uploads to WebGL asynchronously. Always poll the navigation gate (section 2) before screenshotting.
 
@@ -336,13 +349,13 @@ def test_viz_loads_and_search_returns_hits(page: Page, autorag_server: str) -> N
     page.goto(f"{autorag_server}/viz")
     page.wait_for_function(
         "!document.getElementById('loading-overlay').classList.contains('visible')"
-        " && document.getElementById('stats').textContent !== '—'",
+        " && document.getElementById('rail') && document.querySelector('canvas')",
         timeout=10_000,
     )
     page.fill("#search-input", "attention")
     page.wait_for_function(
         "document.querySelectorAll('#search-results .search-hit').length > 0",
-        timeout=2_000,
+        timeout=2_000,  # 350ms debounce + /viz/search round-trip
     )
     hits = page.eval_on_selector_all("#search-results .search-hit", "els => els.length")
     assert hits >= 1
@@ -358,14 +371,15 @@ Save screenshots under `tests/browser/__snapshots__/` and add that path to `.git
 |---|---|---|
 | Start server | `Bash(run_in_background=true)` + `curl /health` | `{"status":"ok"}` |
 | Find stale | `pgrep -af 'autorag serve'`, `lsof -ti :8000` | — |
-| Load `/viz` | `puppeteer_navigate` | `#loading-overlay` not `.visible` AND `#stats !== '—'` |
-| Search | `puppeteer_fill('#search-input')` | `#search-results .search-hit` count > 0 (~300ms debounce) |
+| Load `/viz` | `puppeteer_navigate` | `#loading-overlay` not `.visible` AND `#rail` + `canvas` present (or `#empty-overlay`/`#error-overlay` `.visible`) |
+| Search | `puppeteer_fill('#search-input')` | `#search-results .search-hit` count > 0 (~350ms debounce) |
 | Click hit | `puppeteer_click('#search-results .search-hit:first-child')` | After hits visible |
 | Call API (browser) | `puppeteer_evaluate("await (await fetch(...)).json()")` | HTTP 200 |
 | Call API (shell) | `curl -sS ... \| jq` | HTTP 200 |
 | Drive Swagger | `puppeteer_navigate('/docs')` + clicks | `.responses-wrapper pre` populated |
 | Screenshot page | `puppeteer_screenshot(name=...)` | After load gated above |
-| Screenshot canvas | `puppeteer_screenshot(name=..., selector='#canvas')` | Same |
+| Screenshot canvas | `puppeteer_screenshot(name=..., selector='canvas')` | Same (no `#id` — element selector) |
 | Screenshot rail | `puppeteer_screenshot(name=..., selector='#rail')` | Same |
-| Inspect Three.js state | `puppeteer_evaluate('window.__viz...')` | Requires `?debug=1` viz.html instrumentation (future) |
+| Detect WebGL fail | `puppeteer_evaluate("!!document.querySelector('#rail') && !document.querySelector('canvas')")` | `true` = SceneBoundary fallback |
+| Inspect store state | `puppeteer_evaluate('window.__viz.getState()...')` | Requires `?debug=1` Zustand-on-window instrumentation in `frontend/src/main.tsx` (future) |
 | Cleanup | `kill <bash_id pid>` | — |

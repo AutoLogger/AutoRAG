@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size sharply; `AutoRAG.generate_topics` / `build_agent` signatures and the
   `Runnable[list[WordSpan], TopicTree]` contract are unchanged.
 
+### Removed
+- `src/autorag/static/viz.html` — the original vanilla Three.js `/viz`
+  page. It was orphaned once `/viz` switched to the React bundle (`viz.py`
+  serves `static/viz/index.html`, never this file) and had been shipping
+  unused in the wheel via the `static/` glob.
+
 ### Fixed
 - `IngestRequest` (`POST /ingest`) is no longer left "not fully defined":
   `pathlib.Path` is imported at runtime again so Pydantic can resolve the
