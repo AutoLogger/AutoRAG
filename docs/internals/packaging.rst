@@ -6,7 +6,7 @@ git tag:
 
 .. code-block:: bash
 
-    pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.6.0"
+    pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.7.0"
 
 Build backend: ``uv_build``. The package layout is the standard ``src/``
 shape:

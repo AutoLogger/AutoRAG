@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-15
+
 ### Added
 - `GET /viz` now renders the interactive 3-D topic constellation: per-level
   glowing points, clip/cluster coloring, additive knowledge-graph edges, a
@@ -188,7 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.3.3...v0.4.0

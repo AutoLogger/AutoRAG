@@ -6,7 +6,7 @@ URL, provided the ``[youtube]`` extra is installed:
 
 .. code-block:: bash
 
-    pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.6.0"
+    pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.7.0"
 
 Supported hosts (allowlisted in :func:`autorag.audio_source.is_youtube_url`):
 ``youtube.com``, ``www.youtube.com``, ``m.youtube.com``,

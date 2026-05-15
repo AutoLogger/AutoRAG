@@ -1,6 +1,6 @@
 # AutoRAG Project
 
-Python 3.12 project managed with `uv`. Distribution is **GitHub-hosted, not PyPI** — consumers pin to a git tag (`pip install "autorag[...] @ git+https://github.com/AutoLogger/AutoRAG@v0.6.0`). User-facing documentation is in `docs/` (Sphinx); keep this file in sync with it.
+Python 3.12 project managed with `uv`. Distribution is **GitHub-hosted, not PyPI** — consumers pin to a git tag (`pip install "autorag[...] @ git+https://github.com/AutoLogger/AutoRAG@v0.7.0`). User-facing documentation is in `docs/` (Sphinx); keep this file in sync with it.
 
 ## Package Manager
 
@@ -175,7 +175,7 @@ Other settings:
 
 `[diarize]` rides on top of `[audio]` — pyannote needs the same torch + ffmpeg stack; install them together.
 
-Build backend: `uv_build`. Releases: bump `__version__` in `src/autorag/__init__.py` and `version` in `pyproject.toml`, `uv lock`, commit, `git tag v0.x.0 && git push --tags`. Current version: `0.6.0`.
+Build backend: `uv_build`. Releases: bump `__version__` in `src/autorag/__init__.py` and `version` in `pyproject.toml`, `uv lock`, commit, `git tag v0.x.0 && git push --tags`. Current version: `0.7.0`.
 
 ## Frontend (`/viz` page)
 

@@ -50,13 +50,13 @@ Installing from a tagged release
 .. code-block:: bash
 
     # Audio → topics agent only
-    pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.6.0"
+    pip install "autorag[audio,diarize] @ git+https://github.com/AutoLogger/AutoRAG@v0.7.0"
 
     # Audio + YouTube URL support
-    pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.6.0"
+    pip install "autorag[audio,diarize,youtube] @ git+https://github.com/AutoLogger/AutoRAG@v0.7.0"
 
     # Full stack (audio, diarize, rag, server, youtube)
-    pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.6.0"
+    pip install "autorag[all] @ git+https://github.com/AutoLogger/AutoRAG@v0.7.0"
 
 Calling a method whose extra is missing raises
 :class:`~autorag.errors.MissingExtraError` with a hint naming the
