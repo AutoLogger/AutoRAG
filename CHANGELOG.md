@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pathlib.Path` is imported at runtime again so Pydantic can resolve the
   `paths` field. Restores `IngestRequest.model_rebuild()`, FastAPI OpenAPI
   schema generation, and the Sphinx autodoc build.
+- The strict docs build no longer fails under `--all-extras`:
+  `transformers` (pulled transitively by `langchain_core`, a base dep) is
+  now mocked in `autodoc_mock_imports`, so base+docs and all-extras builds
+  take the same path.
 
 ## [0.6.0] - 2026-05-12
 

@@ -75,6 +75,13 @@ autodoc_mock_imports = [
     "uvicorn",
     "imageio_ffmpeg",
     "huggingface_hub",
+    # Pulled transitively by langchain_core (a *base* dep) via a guarded
+    # ``from transformers import GPT2TokenizerFast``. In base+docs CI
+    # transformers is absent and that import is swallowed; in an all-extras
+    # env the real transformers runs ``os.path.join(constants.HF_HOME, ...)``
+    # where ``constants`` is the mocked ``huggingface_hub``, which raises.
+    # Mocking transformers makes both environments take the same path.
+    "transformers",
     "numpy",
 ]
 
