@@ -200,6 +200,8 @@ Build backend: `uv_build`. Releases: bump `__version__` in `src/autorag/__init__
 
 `frontend/` lives outside `src/autorag/` so `uv` / `ruff` / `mypy` don't scan TypeScript. The build output lives **inside** the Python package so wheel packaging picks it up via the existing `static/` glob — no `MANIFEST.in` changes.
 
+`App.tsx` wraps `<Scene>` in `ui/SceneBoundary` (an error boundary): r3f's `<Canvas>` throws synchronously when a WebGL context can't be created (software/headless GL, blocklisted GPU), so the boundary keeps the rail + overlays alive with a "3D view unavailable" notice instead of unmounting the whole app to a blank page. The scene normalizes UMAP coords (bbox centroid → origin, longest axis → 7 world units in `three/layout.ts`) — raw `/viz/data` coordinates are not origin-centred, so without this the cloud renders off-camera.
+
 ### Build flow
 
 ```bash

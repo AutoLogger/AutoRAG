@@ -213,6 +213,12 @@ canvas {
 }
 
 .search-hit {
+	appearance: none;
+	border: 0;
+	background: transparent;
+	width: 100%;
+	font-family: inherit;
+	text-align: left;
 	padding: 4px 4px;
 	font-size: 0.68rem;
 	color: var(--text-hi);

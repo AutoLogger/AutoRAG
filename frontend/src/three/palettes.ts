@@ -50,3 +50,8 @@ export function clipColor(clipIndex: number): number {
 export function clusterColor(clusterId: number): number {
 	return CLUSTER_PALETTE[clusterId % CLUSTER_PALETTE.length] ?? 0xffffff;
 }
+
+/** Split a 0xRRGGBB int into normalized [r, g, b] for THREE vertex colors. */
+export function hexToRgb01(n: number): [number, number, number] {
+	return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
+}

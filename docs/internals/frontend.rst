@@ -45,6 +45,12 @@ The TypeScript source lives outside ``src/autorag/`` so ``uv`` /
 the Python package so wheel packaging picks it up via the existing
 ``static/`` glob — no ``MANIFEST.in`` changes needed.
 
+``App.tsx`` wraps ``<Scene>`` in ``ui/SceneBoundary`` — an error
+boundary. r3f's ``<Canvas>`` throws synchronously when a WebGL context
+can't be created (software/headless GL, blocklisted GPU); the boundary
+keeps the rail and overlays alive and shows a "3D view unavailable"
+notice instead of unmounting the whole app to a blank page.
+
 Build flow
 ----------
 

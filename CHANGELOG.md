@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `GET /viz` now renders the interactive 3-D topic constellation: per-level
+  glowing points, clip/cluster coloring, additive knowledge-graph edges, a
+  pointer tooltip, two-way rail↔scene hover sync, and debounced semantic
+  search with click-to-focus. The React rewrite had previously shipped only
+  the left rail, so the page showed no embeddings; the r3f scene
+  (`frontend/src/three/`) is now implemented and the committed bundle
+  rebuilt. UMAP coordinates are recentred/scaled in `three/layout.ts` (raw
+  `/viz/data` coords are not origin-centred), and an error boundary keeps
+  the rail usable if WebGL is unavailable.
 - Hosted documentation at <https://autologger.github.io/AutoRAG/>, published
   to GitHub Pages on every push to `main` (`.github/workflows/docs.yml`).
 - `autorag.blocks.mmss(t)` — public `MM:SS` second-formatter (promoted from

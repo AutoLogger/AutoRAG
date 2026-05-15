@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TopicPoint } from "../api/types";
+import type { SearchResult, TopicPoint } from "../api/types";
 
 export type ColorMode = "clip" | "cluster";
 
@@ -15,6 +15,7 @@ export interface VizState {
 	hoverIndex: number | null;
 	focusIndex: number | null;
 	tooltip: TooltipState;
+	searchResults: SearchResult[];
 	setColorMode: (mode: ColorMode) => void;
 	toggleColorMode: () => void;
 	setEdgesVisible: (visible: boolean) => void;
@@ -23,6 +24,7 @@ export interface VizState {
 	setFocusIndex: (i: number | null) => void;
 	setTooltip: (t: TooltipState) => void;
 	clearTooltip: () => void;
+	setSearchResults: (results: SearchResult[]) => void;
 }
 
 export const useVizStore = create<VizState>((set) => ({
@@ -31,6 +33,7 @@ export const useVizStore = create<VizState>((set) => ({
 	hoverIndex: null,
 	focusIndex: null,
 	tooltip: { point: null, x: 0, y: 0 },
+	searchResults: [],
 	setColorMode: (mode) => set({ colorMode: mode }),
 	toggleColorMode: () =>
 		set((s) => ({ colorMode: s.colorMode === "clip" ? "cluster" : "clip" })),
@@ -40,4 +43,5 @@ export const useVizStore = create<VizState>((set) => ({
 	setFocusIndex: (i) => set({ focusIndex: i }),
 	setTooltip: (t) => set({ tooltip: t }),
 	clearTooltip: () => set({ tooltip: { point: null, x: 0, y: 0 } }),
+	setSearchResults: (results) => set({ searchResults: results }),
 }));

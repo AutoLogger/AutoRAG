@@ -5,7 +5,7 @@
       "env": {
         "PUPPETEER_EXECUTABLE_PATH": "/usr/bin/google-chrome-stable",
         "PUPPETEER_LAUNCH_OPTIONS": "{\"headless\":false,\"userDataDir\":\"/home/node/.config/google-chrome/puppeteer\",\"args\":[\"--no-sandbox\",\"--disable-setuid-sandbox\",\"--disable-dev-shm-usage\",\"--ozone-platform=wayland\",\"--ignore-gpu-blocklist\",\"--use-gl=angle\",\"--use-angle=opengl\",\"--enable-gpu-rasterization\",\"--enable-zero-copy\",\"--enable-oop-rasterization\",\"--enable-features=VaapiVideoDecoder,CanvasOopRasterization\"]}",
-        "ALLOW_DANGEROUS_REQUEST": "true"
+        "ALLOW_DANGEROUS": "true"
       }
     }
   }
