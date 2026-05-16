@@ -77,6 +77,20 @@ After each ``_run_diarization`` call the pyannote pipeline is
 offloaded to CPU and VRAM freed; ``_ensure_pipeline_on_cuda`` restores
 it on the next call.
 
+LLM model residency
+-------------------
+
+Whisper and pyannote are offloaded to CPU between calls; the Ollama
+LLM gets the opposite treatment. All five topic stages share one
+``num_ctx`` and ``keep_alive="5m"``, so the model stays resident in
+VRAM for the entire run rather than reloading per stage (a ~15 GB
+disk→VRAM load each time). When the run finishes — or any stage
+raises — ``_build_tree`` issues one throwaway ``keep_alive=0`` call
+that evicts the model so it doesn't squat VRAM during the downstream
+embed / ``/viz`` step. See :doc:`ollama-tuning` for the ``num_ctx``
+uniformity rationale and the ``num_ctx_l1`` escape hatch for very long
+audio.
+
 Why split boundaries from summaries
 -----------------------------------
 

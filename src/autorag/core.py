@@ -145,7 +145,7 @@ class AutoRAG:
         *,
         llm_model: str = "qwen2.5:14b-instruct-q8_0",
         ollama_base_url: str | None = None,
-        num_ctx_l1: int = 16384,
+        num_ctx_l1: int = 8192,
         num_ctx_fanout: int = 8192,
         max_concurrency: int = 4,
         min_subdivide_duration_s: float = 120.0,

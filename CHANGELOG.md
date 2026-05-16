@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The topic agent now keeps the Ollama model resident in VRAM for the whole
+  run instead of cold-reloading it (~15 GB) at every stage boundary. All five
+  stages share one `num_ctx` and `keep_alive="5m"` (Ollama reloads on any
+  `num_ctx` change, so a uniform size is what keeps it warm); `_build_tree`
+  issues one throwaway `keep_alive=0` call after the run — or on a stage error
+  — to evict the model so it doesn't squat VRAM during the downstream
+  embed/viz step. Substantially cuts topic-generation wall-clock.
+- `num_ctx_l1` now defaults to `8192` (was `16384`) in
+  `AutoRAG.generate_topics` / `agent.build_topic_runnable` / `build_agent`, so
+  the L1 call shares the fan-out context size. Trade-off: on very long audio
+  (≈1 hr+) the L1 transcript can truncate at 8192 and degrade boundary
+  quality — raise `num_ctx_l1` back to `16384` to restore fidelity, at the
+  cost of one model reload at the Stage 2→3a boundary.
+
 ## [0.7.0] - 2026-05-15
 
 ### Added

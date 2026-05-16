@@ -309,7 +309,7 @@ def build_topic_runnable(
     *,
     llm_model: str = "qwen2.5:14b-instruct-q8_0",
     ollama_base_url: str | None = None,
-    num_ctx_l1: int = 16384,
+    num_ctx_l1: int = 8192,
     num_ctx_fanout: int = 8192,
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
@@ -318,24 +318,35 @@ def build_topic_runnable(
 
     Notes on Ollama settings (server-side, controlled outside this module):
 
+    - Every stage uses the same `num_ctx` (`num_ctx_fanout`, default 8192)
+      and `keep_alive="5m"`, so the model stays resident across the
+      sub-second inter-stage gaps. Ollama reloads a model whenever `num_ctx`
+      changes between requests, so a uniform context size is what actually
+      keeps it warm — there are zero mid-run reloads. After Stage 5 (and on
+      any stage error) `_build_tree` issues one throwaway `keep_alive=0`
+      call that evicts the model so it doesn't squat VRAM during the
+      downstream embed/viz step. The finite 5-minute `keep_alive` is a
+      crash-safety fallback: if the run dies before the explicit eviction,
+      Ollama still unloads the model on its own.
     - `temperature=0.0` plus identical system prompts per chain plus
       `OLLAMA_MULTIUSER_CACHE=true` give prefix-cache hits across all calls
-      inside a single chain. We set `keep_alive=0` so Ollama unloads the
-      model the moment the last in-flight request finishes, but during a
-      batch the model stays loaded (Ollama ref-counts in-flight requests),
-      so this only kicks in at stage boundaries.
-    - With `OLLAMA_NUM_PARALLEL=1` (current server config for the 14B
-      model) the server serializes batched requests, so Stage 3a/3b
-      wall-clock is `N x per-call`, not `N/4 x per-call`. Raising
-      `NUM_PARALLEL` requires more VRAM (the server reserves all slots'
-      KV-cache up front at the request's `num_ctx`). See `CLAUDE.md`
+      inside a single chain.
+    - `num_ctx_l1` is still overridable. The Stage 2 (L1) call sees the
+      whole time-bucketed transcript; on very long audio (≈1 hr+) 8192
+      tokens can truncate it and degrade L1 boundaries. Raising `num_ctx_l1`
+      back to e.g. 16384 fixes that at the cost of exactly one model reload
+      at the Stage 2→3a boundary (the L1 call then differs in `num_ctx`).
+    - With `OLLAMA_NUM_PARALLEL=1` the server serializes batched requests,
+      so Stage 3a/3b wall-clock is `N x per-call`, not `N/4 x per-call`.
+      Raising `NUM_PARALLEL` requires more VRAM (the server reserves all
+      slots' KV-cache up front at the request's `num_ctx`). See `CLAUDE.md`
       "Ollama tuning notes".
     """
 
     base_kwargs: dict[str, Any] = {
         "model": llm_model,
         "temperature": 0.0,
-        "keep_alive": 0,
+        "keep_alive": "5m",
         "base_url": ollama_base_url or _ollama_base_url(),
     }
 
@@ -353,6 +364,18 @@ def build_topic_runnable(
     )
     agg_llm = ChatOllama(num_ctx=num_ctx_fanout, **base_kwargs).with_structured_output(
         _L0Summary, method="json_schema"
+    )
+    # Bare (no structured output) one-token call used only to evict the model
+    # from VRAM after the run. `num_ctx` matches the resident model so this
+    # hits the warm model and tells Ollama to unload it, rather than
+    # triggering a reload-just-to-unload.
+    unload_llm = ChatOllama(
+        num_ctx=num_ctx_fanout,
+        model=llm_model,
+        base_url=base_kwargs["base_url"],
+        temperature=0.0,
+        keep_alive=0,
+        num_predict=1,
     )
 
     l1_chain = (
@@ -493,52 +516,63 @@ def build_topic_runnable(
 
         audio_e = _audio_end(spans)
 
-        logger.info("Stage 2 (L1 boundaries): 1 call, num_ctx=%d", num_ctx_l1)
-        t0 = time.time()
-        l1_nodes = _extract_l1_boundaries(spans, audio_e)
-        logger.info("Stage 2 done in %.1fs (%d L1 topics)", time.time() - t0, len(l1_nodes))
+        try:
+            logger.info("Stage 2 (L1 boundaries): 1 call, num_ctx=%d", num_ctx_l1)
+            t0 = time.time()
+            l1_nodes = _extract_l1_boundaries(spans, audio_e)
+            logger.info("Stage 2 done in %.1fs (%d L1 topics)", time.time() - t0, len(l1_nodes))
 
-        logger.info(
-            "Stage 3a (decide subdivide): up to %d batched calls (min slice=%.0fs)",
-            len(l1_nodes),
-            min_subdivide_duration_s,
-        )
-        t0 = time.time()
-        decisions = _decide_subdivide_batch(l1_nodes, spans)
-        yes_count = sum(1 for d in decisions if d)
-        logger.info(
-            "Stage 3a done in %.1fs (%d/%d subdivide=true)",
-            time.time() - t0,
-            yes_count,
-            len(l1_nodes),
-        )
+            logger.info(
+                "Stage 3a (decide subdivide): up to %d batched calls (min slice=%.0fs)",
+                len(l1_nodes),
+                min_subdivide_duration_s,
+            )
+            t0 = time.time()
+            decisions = _decide_subdivide_batch(l1_nodes, spans)
+            yes_count = sum(1 for d in decisions if d)
+            logger.info(
+                "Stage 3a done in %.1fs (%d/%d subdivide=true)",
+                time.time() - t0,
+                yes_count,
+                len(l1_nodes),
+            )
 
-        yes_l1_nodes = [l1 for l1, d in zip(l1_nodes, decisions, strict=True) if d]
-        logger.info("Stage 3b (L2 boundaries): %d batched calls", len(yes_l1_nodes))
-        t0 = time.time()
-        l2_lists = _extract_l2_boundaries_batch(yes_l1_nodes, spans)
-        for l1, kids in zip(yes_l1_nodes, l2_lists, strict=True):
-            l1["children"] = kids
-        l2_total = sum(len(k) for k in l2_lists)
-        logger.info("Stage 3b done in %.1fs (%d L2 topics)", time.time() - t0, l2_total)
+            yes_l1_nodes = [l1 for l1, d in zip(l1_nodes, decisions, strict=True) if d]
+            logger.info("Stage 3b (L2 boundaries): %d batched calls", len(yes_l1_nodes))
+            t0 = time.time()
+            l2_lists = _extract_l2_boundaries_batch(yes_l1_nodes, spans)
+            for l1, kids in zip(yes_l1_nodes, l2_lists, strict=True):
+                l1["children"] = kids
+            l2_total = sum(len(k) for k in l2_lists)
+            logger.info("Stage 3b done in %.1fs (%d L2 topics)", time.time() - t0, l2_total)
 
-        nodes_to_summarize: list[TopicDict] = []
-        for l1 in l1_nodes:
-            nodes_to_summarize.append(l1)
-            for l2 in l1.get("children") or []:
-                nodes_to_summarize.append(l2)
-        logger.info("Stage 4 (summarize nodes): %d batched calls", len(nodes_to_summarize))
-        t0 = time.time()
-        _summarize_nodes_batch(nodes_to_summarize, spans)
-        logger.info("Stage 4 done in %.1fs", time.time() - t0)
+            nodes_to_summarize: list[TopicDict] = []
+            for l1 in l1_nodes:
+                nodes_to_summarize.append(l1)
+                for l2 in l1.get("children") or []:
+                    nodes_to_summarize.append(l2)
+            logger.info("Stage 4 (summarize nodes): %d batched calls", len(nodes_to_summarize))
+            t0 = time.time()
+            _summarize_nodes_batch(nodes_to_summarize, spans)
+            logger.info("Stage 4 done in %.1fs", time.time() - t0)
 
-        logger.info("Stage 5 (L0 aggregate): 1 call")
-        t0 = time.time()
-        l0 = _aggregate_l0(l1_nodes, audio_e)
-        l0["children"] = l1_nodes
-        logger.info("Stage 5 done in %.1fs", time.time() - t0)
+            logger.info("Stage 5 (L0 aggregate): 1 call")
+            t0 = time.time()
+            l0 = _aggregate_l0(l1_nodes, audio_e)
+            l0["children"] = l1_nodes
+            logger.info("Stage 5 done in %.1fs", time.time() - t0)
 
-        return {"topics": [l0]}
+            return {"topics": [l0]}
+        finally:
+            # Evict the model from VRAM now that the run is done (or has
+            # errored) so it doesn't squat memory during the downstream
+            # embed/viz step. Swallow + debug-log on failure — never mask a
+            # pipeline error, matching the whisper/pyannote offload idiom.
+            try:
+                unload_llm.invoke(".")
+                logger.debug("Ollama topic model evicted (keep_alive=0).")
+            except Exception as exc:
+                logger.debug("Ollama model eviction failed (%s); continuing.", exc)
 
     return RunnableLambda(_build_tree)
 
@@ -549,7 +583,7 @@ def build_agent(
     language: str | None = None,
     llm_model: str = "qwen2.5:14b-instruct-q8_0",
     ollama_base_url: str | None = None,
-    num_ctx_l1: int = 16384,
+    num_ctx_l1: int = 8192,
     num_ctx_fanout: int = 8192,
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
