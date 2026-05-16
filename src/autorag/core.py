@@ -114,7 +114,7 @@ class AutoRAG:
         file: Path | str,
         *,
         whisper_model: str = "base",
-        language: str | None = None,
+        language: str | None = "en",
     ) -> list[WordSpan]:
         """Run Whisper + diarization on an audio file or YouTube URL.
 
@@ -126,6 +126,9 @@ class AutoRAG:
         Returns raw word spans. Use :meth:`generate_topics` for the LLM
         topic tree, and :meth:`persist_transcription` / :meth:`persist_topics`
         to store results (separate ``[rag]`` extra).
+
+        ``language`` defaults to English (``"en"``); pass ``language=None``
+        to let Whisper auto-detect.
 
         Requires ``pip install 'autorag[audio,diarize]'``,
         plus ``[youtube]`` when passing a URL.
@@ -150,6 +153,7 @@ class AutoRAG:
         max_concurrency: int = 4,
         min_subdivide_duration_s: float = 120.0,
         reasoning: bool = False,
+        boundary_block_seconds: int = 30,
     ) -> TopicTree:
         """Run LLM topic extraction on pre-computed word spans.
 
@@ -170,6 +174,7 @@ class AutoRAG:
             max_concurrency=max_concurrency,
             min_subdivide_duration_s=min_subdivide_duration_s,
             reasoning=reasoning,
+            boundary_block_seconds=boundary_block_seconds,
         )
         return collapse_lone_children(raw)
 
@@ -193,7 +198,7 @@ class AutoRAG:
         force_retranscribe: bool = False,
         db_path: Path | None = None,
         whisper_model: str = "base",
-        language: str | None = None,
+        language: str | None = "en",
         title: str | None = None,
     ) -> str:
         """Return the transcription formatted as N-second time blocks.

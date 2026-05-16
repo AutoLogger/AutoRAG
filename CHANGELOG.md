@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-16
+
+### Added
+- `autorag generate-topics` now exposes the LLM tuning knobs that
+  `AutoRAG.generate_topics` already accepted: `--num-ctx-l1`,
+  `--num-ctx-fanout`, `--max-concurrency`, `--min-subdivide-duration-s`,
+  and `--reasoning/--no-reasoning`. Forwarded 1:1 to the facade with the
+  same defaults (`8192` / `8192` / `4` / `120.0` / `False`);
+  `ollama_base_url` stays env-only via `AUTORAG_OLLAMA_BASE_URL`.
+- New `boundary_block_seconds` tuning kwarg (default `30`) on
+  `AutoRAG.generate_topics` / `agent.build_topic_runnable` /
+  `agent.build_agent`, exposed as `--boundary-block-seconds` on `autorag
+  generate-topics`. Sizes the time-bucketed transcript fed to the L1/L2
+  boundary prompts (was the hardcoded private `_BOUNDARY_BLOCK_SECONDS`);
+  smaller windows give finer `MM:SS` anchors at the cost of more
+  boundary-prompt tokens.
+
 ### Changed
 - **Default topic LLM is now `gemma4:latest`** (8B Q4_K_M, ~9.6 GB), replacing
   `qwen2.5:14b-instruct-q8_0`, across `AutoRAG.generate_topics` /
@@ -32,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (≈1 hr+) the L1 transcript can truncate at 8192 and degrade boundary
   quality — raise `num_ctx_l1` back to `16384` to restore fidelity, at the
   cost of one model reload at the Stage 2→3a boundary.
+- **Transcription now defaults to English.** `--language` defaults to `en`
+  on `autorag transcribe` / `generate-topics` / `blocks`, and the
+  `language` parameter defaults to `"en"` on `AutoRAG.transcribe` /
+  `AutoRAG.transcribe_blocks` / `agent.transcribe_audio` /
+  `agent.build_agent` (was Whisper auto-detect). Behavior change for SDK
+  consumers relying on auto-detect: pass `language=None` (SDK) or
+  `--language ""` (CLI) to restore it.
 
 ## [0.7.0] - 2026-05-15
 
@@ -216,7 +240,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-Ollama LLM providers.
 - Unused `replace_existing` parameter from the transcription flow.
 
-[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/AutoLogger/AutoRAG/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AutoLogger/AutoRAG/compare/v0.4.0...v0.5.0

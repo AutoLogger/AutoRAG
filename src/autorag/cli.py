@@ -59,7 +59,10 @@ def transcribe(
         help="Whisper model size: tiny/base/small/medium/large",
     ),
     language: str = typer.Option(
-        "", "--language", "-l", help="Whisper language code (auto-detect if empty)"
+        "en",
+        "--language",
+        "-l",
+        help="Whisper language code (default: English; pass '' to auto-detect).",
     ),
     persist: bool = typer.Option(
         True, "--persist/--no-persist", help="Write word spans to SQLite (default: true)."
@@ -145,8 +148,48 @@ def generate_topics(
         "-m",
         help="LLM model name (uses provider default if empty)",
     ),
+    num_ctx_l1: int = typer.Option(
+        8192,
+        "--num-ctx-l1",
+        min=512,
+        help="LLM context for the Stage 2 L1-boundary call "
+        "(raise to ~16384 for 1hr+ audio; costs one model reload).",
+    ),
+    num_ctx_fanout: int = typer.Option(
+        8192,
+        "--num-ctx-fanout",
+        min=512,
+        help="LLM context for the batched fan-out stages (3a/3b/4/5).",
+    ),
+    max_concurrency: int = typer.Option(
+        4,
+        "--max-concurrency",
+        min=1,
+        help="Max parallel LLM calls in batched stages (match OLLAMA_NUM_PARALLEL).",
+    ),
+    min_subdivide_duration_s: float = typer.Option(
+        120.0,
+        "--min-subdivide-duration-s",
+        min=0.0,
+        help="Minimum L1 span length (s) before the L2 subdivide decision runs.",
+    ),
+    reasoning: bool = typer.Option(
+        False,
+        "--reasoning/--no-reasoning",
+        help="Enable chain-of-thought on thinking-capable models (slower; A/B quality).",
+    ),
+    boundary_block_seconds: int = typer.Option(
+        30,
+        "--boundary-block-seconds",
+        min=1,
+        help="Time-bucket window (s) for the L1/L2 boundary-prompt transcript; "
+        "smaller = finer MM:SS anchors but more prompt tokens.",
+    ),
     language: str = typer.Option(
-        "", "--language", "-l", help="Whisper language code (auto-detect if empty)"
+        "en",
+        "--language",
+        "-l",
+        help="Whisper language code (default: English; pass '' to auto-detect).",
     ),
     transcription_json: str | None = typer.Option(
         None,
@@ -227,7 +270,16 @@ def generate_topics(
 
     # Generate topics
     t0 = time.perf_counter()
-    topics = rag.generate_topics(words, llm_model=llm_model)
+    topics = rag.generate_topics(
+        words,
+        llm_model=llm_model,
+        num_ctx_l1=num_ctx_l1,
+        num_ctx_fanout=num_ctx_fanout,
+        max_concurrency=max_concurrency,
+        min_subdivide_duration_s=min_subdivide_duration_s,
+        reasoning=reasoning,
+        boundary_block_seconds=boundary_block_seconds,
+    )
     agent_secs = time.perf_counter() - t0
 
     # Persist topics
@@ -304,7 +356,10 @@ def blocks(
     db_override: Path | None = typer.Option(None, "--db", help="Override database path"),
     whisper_model: str = typer.Option("base", "--whisper-model", "-w"),
     language: str = typer.Option(
-        "", "--language", "-l", help="Whisper language code (auto-detect if empty)"
+        "en",
+        "--language",
+        "-l",
+        help="Whisper language code (default: English; pass '' to auto-detect).",
     ),
 ) -> None:
     """Print the transcription as N-second time blocks, one line per speaker turn.

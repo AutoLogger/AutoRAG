@@ -28,7 +28,8 @@ Transcribe a local file
 
 * ``whisper_model`` accepts the standard Whisper sizes (``tiny``,
   ``base``, ``small``, ``medium``, ``large``).
-* ``language`` is auto-detected when omitted.
+* ``language`` defaults to English (``"en"``); pass ``language=None``
+  (SDK) or ``--language ""`` (CLI) to let Whisper auto-detect.
 * Each :data:`~autorag.types.WordSpan` carries the word token, its
   start/end seconds, and the diarization-assigned speaker id
   (``"0"``-indexed in first-appearance order; always ``"0"`` when

@@ -22,7 +22,8 @@ Total LLM calls per clip: roughly
 seven-minute clip.
 
 Boundary calls receive the transcript as a time-bucketed view
-(:func:`autorag.blocks.format_blocks`, 30-second windows — one
+(:func:`autorag.blocks.format_blocks`, 30-second windows by default,
+tunable via ``boundary_block_seconds`` — one
 ``MM:SS-MM:SS Speaker K: <words>`` line per turn instead of one
 timestamped line per word, which keeps the boundary prompts compact).
 They emit ``{s, e}`` as ``MM:SS`` strings copied straight from those

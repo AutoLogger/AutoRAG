@@ -21,8 +21,8 @@ default), the words are written to SQLite.
                                  video id).
     --whisper-model -w  TEXT     tiny / base / small / medium / large
                                  [default: base]
-    --language      -l  TEXT     Whisper language code (auto-detect if
-                                 empty).
+    --language      -l  TEXT     Whisper language code [default: en];
+                                 pass '' to auto-detect.
     --persist/--no-persist       Write word spans to SQLite (default: true).
     --db                PATH     Override database path.
 
@@ -39,6 +39,26 @@ extraction, persist everything.
 
     --provider      -p  TEXT     LLM provider [default: ollama]
     --llm-model     -m  TEXT     LLM model [default: gemma4:latest]
+    --language      -l  TEXT     Whisper language code [default: en];
+                                 pass '' to auto-detect.
+    --num-ctx-l1        INT      LLM context for the Stage 2 L1-boundary
+                                 call [default: 8192]; raise to ~16384
+                                 for 1hr+ audio (costs one model reload).
+    --num-ctx-fanout    INT      LLM context for the batched fan-out
+                                 stages 3a/3b/4/5 [default: 8192].
+    --max-concurrency   INT      Max parallel LLM calls in batched
+                                 stages [default: 4]; match
+                                 OLLAMA_NUM_PARALLEL.
+    --min-subdivide-duration-s   Minimum L1 span length in seconds
+                        FLOAT    before the L2 subdivide decision runs
+                                 [default: 120.0].
+    --reasoning/--no-reasoning   Enable chain-of-thought on
+                                 thinking-capable models (slower;
+                                 default: --no-reasoning).
+    --boundary-block-seconds     Time-bucket window (s) for the L1/L2
+                        INT      boundary-prompt transcript [default:
+                                 30]; smaller = finer MM:SS anchors but
+                                 more prompt tokens.
     --transcription -T  TEXT     Pre-computed WordSpan JSON (skip Whisper)
     --persist/--no-persist       Write transcription + topics to
                                  SQLite/Chroma (default: true).

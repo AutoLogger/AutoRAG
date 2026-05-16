@@ -13,7 +13,8 @@ Final shape: ``{"topics": [L0]}`` with ``L0.children = [L1...]``, each
 ``L1.children = [L2...]`` or ``[]``. The L0 root is the explicit "what is
 this audio about" node.
 
-Boundary calls receive a time-bucketed (``format_blocks``, 30s) transcript and
+Boundary calls receive a time-bucketed (``format_blocks``,
+``boundary_block_seconds``, default 30s) transcript and
 emit ``{s, e}`` as ``MM:SS`` strings, which we parse back to float seconds here
 (never the LLM — no model-side arithmetic). Per-node summary calls operate on
 the slice's plain text (no timestamps) and emit ``{title, summary}``. The
@@ -41,10 +42,11 @@ from autorag.types import TopicDict, TopicTree, TranscriptionResult, WordSpan
 
 logger = logging.getLogger(__name__)
 
-# Window size for the block-formatted transcript fed to the L1/L2 boundary
-# prompts. Smaller = more frequent MM:SS anchors (finer possible boundaries) at
-# the cost of more lines; 30s gives a fresh anchor at least twice a minute even
-# inside a long single-speaker monologue.
+# Default window size for the block-formatted transcript fed to the L1/L2
+# boundary prompts (overridable via the `boundary_block_seconds` kwarg). Smaller
+# = more frequent MM:SS anchors (finer possible boundaries) at the cost of more
+# lines; 30s gives a fresh anchor at least twice a minute even inside a long
+# single-speaker monologue.
 _BOUNDARY_BLOCK_SECONDS = 30
 
 
@@ -314,6 +316,7 @@ def build_topic_runnable(
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
     reasoning: bool = False,
+    boundary_block_seconds: int = _BOUNDARY_BLOCK_SECONDS,
 ) -> Runnable[list[WordSpan], TopicTree]:
     """Build a Runnable mapping list[WordSpan] -> TopicTree (L0/L1/L2 hierarchy).
 
@@ -348,6 +351,12 @@ def build_topic_runnable(
       tokens can truncate it and degrade L1 boundaries. Raising `num_ctx_l1`
       back to e.g. 16384 fixes that at the cost of exactly one model reload
       at the Stage 2→3a boundary (the L1 call then differs in `num_ctx`).
+    - `boundary_block_seconds` (default 30) sizes the time-bucketed
+      transcript fed to the L1/L2 boundary prompts. Smaller windows give
+      more frequent `MM:SS` anchors (finer possible boundaries) but more
+      lines (more boundary-prompt tokens); larger windows are terser but
+      coarser. It does not affect the per-node summary input (plain text,
+      no timestamps).
     - With `OLLAMA_NUM_PARALLEL=1` the server serializes batched requests,
       so Stage 3a/3b wall-clock is `N x per-call`, not `N/4 x per-call`.
       Raising `NUM_PARALLEL` requires more VRAM (the server reserves all
@@ -419,7 +428,7 @@ def build_topic_runnable(
             "_BoundaryList",
             l1_chain.invoke(
                 {
-                    "transcript": format_blocks(spans, _BOUNDARY_BLOCK_SECONDS),
+                    "transcript": format_blocks(spans, boundary_block_seconds),
                     "audio_e": mmss(audio_e),
                     "duration_min": audio_e / 60.0,
                     "target_count": _target_count(0.0, audio_e),
@@ -474,7 +483,7 @@ def build_topic_runnable(
             sliced = _slice_spans(spans, ls, le)
             inputs.append(
                 {
-                    "transcript": format_blocks(sliced, _BOUNDARY_BLOCK_SECONDS),
+                    "transcript": format_blocks(sliced, boundary_block_seconds),
                     "slice_s": mmss(ls),
                     "slice_e": mmss(le),
                     "duration_min": (le - ls) / 60.0,
@@ -594,7 +603,7 @@ def build_topic_runnable(
 def build_agent(
     *,
     whisper_model: str = "base",
-    language: str | None = None,
+    language: str | None = "en",
     llm_model: str = "gemma4:latest",
     ollama_base_url: str | None = None,
     num_ctx_l1: int = 8192,
@@ -602,6 +611,7 @@ def build_agent(
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
     reasoning: bool = False,
+    boundary_block_seconds: int = _BOUNDARY_BLOCK_SECONDS,
 ) -> Runnable[Path | str, TranscriptionResult]:
     """Build a Runnable mapping audio file -> {transcription, topics:{topics:[L0]}}."""
     topic_runnable = build_topic_runnable(
@@ -612,6 +622,7 @@ def build_agent(
         max_concurrency=max_concurrency,
         min_subdivide_duration_s=min_subdivide_duration_s,
         reasoning=reasoning,
+        boundary_block_seconds=boundary_block_seconds,
     )
 
     def _whisper_step(file: Path | str) -> list[WordSpan]:
@@ -633,7 +644,7 @@ def transcribe_audio(
     file: Path | str,
     *,
     whisper_model: str = "base",
-    language: str | None = None,
+    language: str | None = "en",
 ) -> list[WordSpan]:
     """Run Whisper + diarization on a local audio file, returning word spans."""
     f = Path(file)
