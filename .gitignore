@@ -29,6 +29,7 @@ data/
 *.webm
 
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 node_modules/
 *.tsbuildinfo
