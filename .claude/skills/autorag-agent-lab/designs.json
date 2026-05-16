@@ -1,19 +1,35 @@
 {
   "baseline": {
-    "description": "Current shipped defaults (src/autorag/agent.py build_topic_runnable).",
+    "description": "Current shipped defaults (src/autorag/agent.py build_topic_runnable): gemma4:latest with thinking disabled.",
     "knobs": {
-      "llm_model": "qwen2.5:14b-instruct-q8_0",
+      "llm_model": "gemma4:latest",
       "num_ctx_l1": 8192,
       "num_ctx_fanout": 8192,
       "max_concurrency": 4,
-      "min_subdivide_duration_s": 120.0
+      "min_subdivide_duration_s": 120.0,
+      "reasoning": false
     },
     "prompt_override": null
   },
-  "qwen2.5-7b": {
-    "description": "Smaller model — expect lower VRAM + faster, watch quality.",
+  "gemma4-thinking": {
+    "description": "Ablation: gemma4:latest with thinking ON (reasoning=True). Quantifies the quality<->latency trade-off of the shipped reasoning=False default; the LEDGER's pre-flip gemma4 rows all ran with thinking on (Ollama default), so this is the apples-to-apples bridge to the new baseline.",
     "knobs": {
-      "llm_model": "qwen2.5:7b-instruct-q8_0"
+      "reasoning": true
+    },
+    "prompt_override": null
+  },
+  "gemma4-26b": {
+    "description": "Bigger sibling gemma4:26b (25.8B Q4_K_M, ~17 GB) — quality-ceiling reference. Operator note: run `ollama serve` with OLLAMA_NUM_PARALLEL=1 before this design (a 17 GB model + 4 reserved slot KVs will not fit 24 GB; see CLAUDE.md \"Ollama tuning\"). max_concurrency=1 keeps the client from batching into slots the server no longer multiplexes.",
+    "knobs": {
+      "llm_model": "gemma4:26b",
+      "max_concurrency": 1
+    },
+    "prompt_override": null
+  },
+  "granite4.1-8b": {
+    "description": "Cross-model comparison: granite4.1:8b (8.8B Q4_K_M). The LEDGER's strongest non-qwen alternative under the old baseline (Pareto win there); kept as a standing comparison candidate against the gemma4 default.",
+    "knobs": {
+      "llm_model": "granite4.1:8b"
     },
     "prompt_override": null
   },

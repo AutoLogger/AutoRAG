@@ -307,12 +307,13 @@ def _new_node(s: float, e: float, *, title: str = "", summary: str = "") -> Topi
 
 def build_topic_runnable(
     *,
-    llm_model: str = "qwen2.5:14b-instruct-q8_0",
+    llm_model: str = "gemma4:latest",
     ollama_base_url: str | None = None,
     num_ctx_l1: int = 8192,
     num_ctx_fanout: int = 8192,
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
+    reasoning: bool = False,
 ) -> Runnable[list[WordSpan], TopicTree]:
     """Build a Runnable mapping list[WordSpan] -> TopicTree (L0/L1/L2 hierarchy).
 
@@ -328,9 +329,20 @@ def build_topic_runnable(
       downstream embed/viz step. The finite 5-minute `keep_alive` is a
       crash-safety fallback: if the run dies before the explicit eviction,
       Ollama still unloads the model on its own.
-    - `temperature=0.0` plus identical system prompts per chain plus
-      `OLLAMA_MULTIUSER_CACHE=true` give prefix-cache hits across all calls
-      inside a single chain.
+    - `temperature=0.0` plus identical system prompts per chain give
+      per-slot prefix-cache hits across all calls inside a single chain.
+      (This works with Ollama's default per-slot cache — it does *not*
+      require `OLLAMA_MULTIUSER_CACHE`, which must stay unset alongside
+      the devcontainer's `FLASH_ATTENTION=1` + concurrent slots; see
+      `CLAUDE.md` "Ollama tuning".)
+    - `reasoning=False` (default) disables thinking on thinking-capable
+      models. The default `gemma4:latest` is a `thinking` model; all five
+      stages do mechanical JSON extraction (boundaries / yes-no /
+      `{title, summary}`) where a chain-of-thought preamble is pure
+      latency and a structured-output parse hazard — the same rationale
+      as `temperature=0.0`. Pass `reasoning=True` to benchmark the
+      quality/latency trade-off (the agent-lab `gemma4-thinking` design)
+      or with a non-thinking model where it is a no-op.
     - `num_ctx_l1` is still overridable. The Stage 2 (L1) call sees the
       whole time-bucketed transcript; on very long audio (≈1 hr+) 8192
       tokens can truncate it and degrade L1 boundaries. Raising `num_ctx_l1`
@@ -346,6 +358,7 @@ def build_topic_runnable(
     base_kwargs: dict[str, Any] = {
         "model": llm_model,
         "temperature": 0.0,
+        "reasoning": reasoning,
         "keep_alive": "5m",
         "base_url": ollama_base_url or _ollama_base_url(),
     }
@@ -374,6 +387,7 @@ def build_topic_runnable(
         model=llm_model,
         base_url=base_kwargs["base_url"],
         temperature=0.0,
+        reasoning=reasoning,
         keep_alive=0,
         num_predict=1,
     )
@@ -581,12 +595,13 @@ def build_agent(
     *,
     whisper_model: str = "base",
     language: str | None = None,
-    llm_model: str = "qwen2.5:14b-instruct-q8_0",
+    llm_model: str = "gemma4:latest",
     ollama_base_url: str | None = None,
     num_ctx_l1: int = 8192,
     num_ctx_fanout: int = 8192,
     max_concurrency: int = 4,
     min_subdivide_duration_s: float = 120.0,
+    reasoning: bool = False,
 ) -> Runnable[Path | str, TranscriptionResult]:
     """Build a Runnable mapping audio file -> {transcription, topics:{topics:[L0]}}."""
     topic_runnable = build_topic_runnable(
@@ -596,6 +611,7 @@ def build_agent(
         num_ctx_fanout=num_ctx_fanout,
         max_concurrency=max_concurrency,
         min_subdivide_duration_s=min_subdivide_duration_s,
+        reasoning=reasoning,
     )
 
     def _whisper_step(file: Path | str) -> list[WordSpan]:

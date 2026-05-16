@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libwayland-client0 \
   dbus \
   pulseaudio-utils \
+  zstd \
   && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
   && locale-gen \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -76,6 +77,7 @@ RUN mkdir -p /workspace/autorag /home/node/.claude \
   /home/node/.config/google-chrome \
   /home/node/.config/matplotlib \
   /home/node/.autorag \
+  /home/node/.ollama \
   /etc/opt/chrome/policies/managed \
   /etc/opt/chrome/policies/recommended \
   /home/node/.npm \
@@ -85,6 +87,7 @@ RUN mkdir -p /workspace/autorag /home/node/.claude \
   /home/node/.config/google-chrome \
   /home/node/.config/matplotlib \
   /home/node/.autorag \
+  /home/node/.ollama \
   /home/node/.npm && \
   chown -R node:node /etc/opt/chrome/policies && \
   chown node:node /run/user/1000 && chmod 700 /run/user/1000
@@ -96,6 +99,20 @@ RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# Ollama — native, in-container LLM server with NVIDIA GPU access.
+# Manual tarball install (the devcontainer has no systemd, and we do NOT want
+# the install.sh's `ollama` system user / systemd unit): extract to /usr/local
+# at build time only. At *runtime* the server runs as the unprivileged `node`
+# user — no sudo, no root daemon (see start-ollama.sh / postStartCommand).
+# The bundled CUDA runner under /usr/local/lib/ollama uses the NVIDIA driver
+# libraries injected by `--gpus=all` (NVIDIA_DRIVER_CAPABILITIES includes
+# `compute`), so GPU offload works with no extra CUDA apt packages.
+ARG OLLAMA_VERSION=0.24.0
+RUN ARCH=$(dpkg --print-architecture) && \
+  curl -fsSL "https://ollama.com/download/ollama-linux-${ARCH}.tar.zst?version=${OLLAMA_VERSION}" \
+  | zstd -d | tar -xf - -C /usr/local && \
+  test -x /usr/local/bin/ollama
 
 # Set up non-root user
 USER node
@@ -130,8 +147,9 @@ RUN npm install -g puppeteer @modelcontextprotocol/server-puppeteer
 # Copy and set up firewall and search scripts
 COPY init-firewall.sh /usr/local/bin/
 COPY search.sh /usr/local/bin/search
+COPY start-ollama.sh /usr/local/bin/start-ollama
 USER root
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/search
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/search /usr/local/bin/start-ollama
 
 USER node
 

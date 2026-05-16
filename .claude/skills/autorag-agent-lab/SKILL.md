@@ -64,7 +64,8 @@ fall back to these defaults):
 
 | Knob | Default | Trades |
 | ---- | ------- | ------ |
-| `llm_model` | `qwen2.5:14b-instruct-q8_0` | quality ↔ latency ↔ VRAM |
+| `llm_model` | `gemma4:latest` | quality ↔ latency ↔ VRAM |
+| `reasoning` | `False` | thinking off (default) keeps the 5 mechanical-JSON stages fast & parse-safe; `True` re-enables gemma4 chain-of-thought — quality ↔ big latency. The `gemma4-thinking` design A/Bs this |
 | `num_ctx_l1` | `8192` | L1 fidelity on >1 h audio ↔ one Stage 2→3a reload if ≠ fanout |
 | `num_ctx_fanout` | `8192` | KV cache size; **must equal `num_ctx_l1` to keep the model warm** (Ollama reloads on any `num_ctx` change) |
 | `max_concurrency` | `4` | batch-stage parallelism (needs `OLLAMA_NUM_PARALLEL≥4`) ↔ VRAM |
@@ -114,7 +115,7 @@ invocation.
 ```
 # A registered design across two fixtures, judged, vs. the baseline:
 uv run python .claude/skills/autorag-agent-lab/bench.py \
-  --design qwen2.5-7b --fixtures fox-new,quin-rs-tut --baseline baseline
+  --design gemma4-thinking --fixtures fox-new,quin-rs-tut --baseline baseline
 
 # Quick inline variant, no judge, dry run (prints the row, writes nothing):
 uv run python .claude/skills/autorag-agent-lab/bench.py \
@@ -125,9 +126,9 @@ uv run python .claude/skills/autorag-agent-lab/bench.py \
 
 ```json
 {
-  "qwen2.5-7b": {
-    "description": "Smaller model — expect lower VRAM + faster, watch quality.",
-    "knobs": { "llm_model": "qwen2.5:7b-instruct-q8_0" },
+  "gemma4-thinking": {
+    "description": "Ablation: gemma4:latest with thinking ON (reasoning=True).",
+    "knobs": { "reasoning": true },
     "prompt_override": null
   }
 }
@@ -174,13 +175,25 @@ plus the produced tree to a judge model with structured output. Rubric, each
 `hierarchy_appropriateness`, `overall`, plus a one-line `rationale`. The
 leaderboard `Judge avg` is the mean of the four sub-dimensions.
 
-- **Pick the judge deliberately.** Default `--judge-model
-  qwen2.5:32b-instruct-q4_K_M` — a *different/larger* model than the typical
-  subject reduces self-enhancement bias. Never judge a model with itself when
-  comparing across models.
+- **Pick the judge deliberately.** Default `--judge-model gemma4:26b` — the
+  25.8B sibling of the `gemma4:latest` subject (different *size*, so not strict
+  self-grading), chosen because it is already pulled and is one of the few
+  strong judges that stays **fully GPU-resident on a 24 GB RTX 3090**: the old
+  `qwen2.5:32b-q4_K_M` and Ollama's `qwen3.6:27b` (~17 GB q4_K_M) both spill
+  ~12% of weights to CPU in-container (~22 GiB usable; whole-layer offload) and
+  run ~2.5× slower. The judge loads only *after* the agent evicts its model
+  (`keep_alive=0`), so the 17 GB judge never contends with the subject for
+  VRAM. **Caveat:** `gemma4:26b` shares gemma4 family priors with the default
+  subject, so for gemma4-vs-gemma4 design diffs it carries family-level
+  self-enhancement bias — for those, prefer a cross-family judge
+  (`--judge-model batiai/qwen3.6-27b:q3`, the ~13 GB Q3 build that also fits
+  fully resident) or read the deltas with that bias in mind.
 - **Scores are comparative, not absolute.** Only compare judge numbers produced
-  by the *same* judge model. If you change `--judge-model`, you've started a new
-  scale — note it and don't cross-compare old rows.
+  by the *same* judge model. The default judge changed from
+  `qwen2.5:32b-instruct-q4_K_M` (then `batiai/qwen3.6-27b:q3`) to `gemma4:26b`,
+  so existing LEDGER rows are on a different scale than new ones — do not
+  cross-compare across the switch (the leaderboard records `judge_model` per
+  row; check it before diffing).
 - Long transcripts are truncated to `--judge-char-budget` (default 48 000
   chars ≈ the 16 k `--judge-num-ctx`); the rationale will say if truncation
   likely hurt coverage scoring.
@@ -233,6 +246,26 @@ Levers from `CLAUDE.md` "Ollama tuning", mapped to the metric each moves:
   `≥4` lets Stage 3a/3b/4 actually parallelize (`max_concurrency=4`); `=1`
   serializes them but frees VRAM for a bigger model. Capture it in the env
   snapshot every run — it explains stage-time deltas the knobs don't.
+- **`OLLAMA_FLASH_ATTENTION` (server env, not a knob)** → long-context
+  prefill latency, localized to the **L1** stage (the only stage with a
+  big prompt; short fan-out stages are unaffected). Measured on
+  `gemma4:latest`/num_ctx=8192/f16-KV: FA off ≈ doubles L1 (~13s vs ~5s),
+  footprint and output unchanged (runs `…-aaf5` FA-off vs `…-1083` FA-on).
+  **Ollama 0.24 auto-enables FA for gemma4 unless `OLLAMA_FLASH_ATTENTION=0`
+  is set explicitly** — unset/default already gives FA-on (log:
+  `Flash Attention was auto, set to enabled`). `=q8_0` KV *requires* FA.
+- **Server-env experiments are not `designs.json` entries** (FA, NUM_PARALLEL,
+  KV type are read by `ollama serve` at startup). To A/B one: restart the
+  server with the new env, **point `AUTORAG_OLLAMA_LOG` at that server's log
+  file**, then run the same `--design` on the same `--fixtures`. The
+  `ollama_flash_attention` / `ollama_kv_cache_type` / `ollama_num_parallel`
+  env-snapshot fields are ground-truthed from that log — **if
+  `AUTORAG_OLLAMA_LOG` is unset they read the stale default `/tmp/ollama.log`
+  and the row is mislabelled** (see run `…-aaf5`'s conclusion: an FA-off row
+  whose auto-captured env wrongly said `Enabled(auto)`). Differentiate the
+  paired rows in their `Conclusion:` lines, not by design name. Kill the
+  server with `pkill -x ollama` — never `pkill -f "ollama serve"` (the `-f`
+  pattern self-matches the very command running it).
 - **`min_subdivide_duration_s`** → call count + L2 coverage. Raising it cuts
   3a/3b/4 calls (cheaper, faster) but flattens the hierarchy; the
   `no-subdivide` design (`1e9`) is the ablation that isolates the L2 layer's
@@ -245,9 +278,11 @@ Levers from `CLAUDE.md` "Ollama tuning", mapped to the metric each moves:
   overrides — test terser *boundary* prompts and faithfulness-tightened
   *summary* prompts independently.
 
-Typical first experiments: `baseline` vs `qwen2.5-7b` (quality floor for the
-cheap model); `baseline` vs `--num-ctx-l1 16384` on `3b1b-llm2` (does the long
-clip's L1 improve?); `baseline` vs `no-subdivide` (is L2 earning its calls?).
+Typical first experiments: `baseline` vs `gemma4-thinking` (what does
+`reasoning=False` cost/save in quality vs latency?); `baseline` vs
+`granite4.1-8b` (cross-model: does the gemma4 default actually win?);
+`baseline` vs `--num-ctx-l1 16384` on `3b1b-llm2` (does the long clip's L1
+improve?); `baseline` vs `no-subdivide` (is L2 earning its calls?).
 
 ## 10. Verification (smoke test of the skill itself)
 
@@ -261,9 +296,10 @@ ls .claude/skills/autorag-agent-lab/fixtures/fox-new.words.json
 uv run python .claude/skills/autorag-agent-lab/bench.py \
   --design baseline --fixtures fox-new --no-judge
 
-# 3. with judge (judge model must differ from the subject)
+# 3. with judge (default judge gemma4:26b; pass batiai/qwen3.6-27b:q3 to
+#    avoid gemma4-family self-enhancement bias on gemma4-vs-gemma4 diffs)
 uv run python .claude/skills/autorag-agent-lab/bench.py \
-  --design baseline --fixtures fox-new --judge-model qwen2.5:32b-instruct-q4_K_M
+  --design baseline --fixtures fox-new --judge-model gemma4:26b
 ```
 
 Expect after step 2: a new `## Leaderboard` row, a `runs/<id>.json` artifact,
@@ -276,8 +312,9 @@ After step 3: judge sub-scores + rationale under `## Runs`. Static checks:
 
 ## 11. Quick reference
 
-**Knobs** — `llm_model`, `num_ctx_l1`, `num_ctx_fanout`, `max_concurrency`,
-`min_subdivide_duration_s`, `ollama_base_url`. Defaults in section 1.
+**Knobs** — `llm_model`, `reasoning`, `num_ctx_l1`, `num_ctx_fanout`,
+`max_concurrency`, `min_subdivide_duration_s`, `ollama_base_url`. Defaults in
+section 1.
 
 **bench.py flags**
 
@@ -288,7 +325,7 @@ After step 3: judge sub-scores + rationale under `## Runs`. Static checks:
 | `--fixtures a,b` | fixture stems (default: all prepared) |
 | `--repeat K` | repeat each fixture K times; report mean±sd |
 | `--no-judge` | skip the LLM judge |
-| `--judge-model M` | judge model (default `qwen2.5:32b-instruct-q4_K_M`) |
+| `--judge-model M` | judge model (default `gemma4:26b`; see §judge caveat) |
 | `--judge-num-ctx` / `--judge-char-budget` | judge context / transcript cap |
 | `--baseline NAME` | design to diff the verdict against |
 | `--llm-model` / `--num-ctx-l1` / `--num-ctx-fanout` / `--max-concurrency` / `--min-subdivide-s` | inline knob overrides |

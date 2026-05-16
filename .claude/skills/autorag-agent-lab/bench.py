@@ -76,6 +76,7 @@ ALLOWED_KNOBS = {
     "num_ctx_fanout",
     "max_concurrency",
     "min_subdivide_duration_s",
+    "reasoning",
 }
 
 # Prompt constants on autorag.agent a prompt-override file may redefine.
@@ -170,6 +171,83 @@ def _gpu_name() -> str:
 
 def _ollama_base_url() -> str:
     return os.environ.get("AUTORAG_OLLAMA_BASE_URL", "http://localhost:11434")
+
+
+def _ollama_num_parallel() -> str:
+    """Ground-truth server parallel-slot count (best effort).
+
+    The value that matters is what ``ollama serve`` actually launched the
+    llama runner with — **not** this process's ``OLLAMA_NUM_PARALLEL`` env.
+    bench.py can run in a different shell than the server (e.g. the server
+    is started by ``start-ollama.sh`` from devcontainer postStart, bench
+    from an interactive shell), so the old ``os.environ`` snapshot was
+    wrong for every historical LEDGER row (it recorded ``"unset"`` even
+    when the server ran ``Parallel:4``). Ollama logs the runner's
+    ``--parallel N`` on every model load; that is the ground truth.
+
+    Precedence: last ``--parallel N`` in the serve log → last
+    ``OLLAMA_NUM_PARALLEL:N`` in the log's startup config dump → this
+    process's env (suffixed ``?env`` to mark it untrusted) → ``"unknown"``.
+    Override the log path with ``AUTORAG_OLLAMA_LOG`` (default the
+    ``/tmp/ollama.log`` that ``start-ollama.sh`` writes).
+    """
+    log_path = Path(os.environ.get("AUTORAG_OLLAMA_LOG", "/tmp/ollama.log"))
+    if log_path.is_file():
+        try:
+            text = log_path.read_text(errors="replace")
+        except OSError:
+            text = ""
+        if runner := re.findall(r"--parallel\s+(\d+)", text):
+            return str(runner[-1])
+        if cfg := re.findall(r"OLLAMA_NUM_PARALLEL[:=]\s*(\d+)", text):
+            return str(cfg[-1])
+    env = os.environ.get("OLLAMA_NUM_PARALLEL")
+    return f"{env}?env" if env else "unknown"
+
+
+def _ollama_runner_cfg() -> dict[str, str]:
+    """Ground-truth attention/KV config from the last runner load request.
+
+    Ollama logs one ``load request="{... Parallel:N BatchSize:512
+    FlashAttention:X KvSize:Y KvCacheType:Z ...}"`` line per model load —
+    the *actually used* config, which can differ from the requested env
+    (e.g. ``OLLAMA_FLASH_ATTENTION=false`` is treated as *auto* and the
+    runner still logs ``FlashAttention:Enabled`` for architectures Ollama
+    auto-enables it on, like gemma4). The server-side env vars alone are
+    therefore not enough to interpret an FA/KV experiment row — record
+    what the runner did, not what was asked.
+
+    Returns ``flash_attention`` (``Enabled`` / ``Disabled`` / ``Auto`` /
+    ``unknown``) and ``kv_cache_type`` (the logged value, or
+    ``f16(default)`` when the field is empty — Ollama's unset default).
+    """
+    out = {"flash_attention": "unknown", "kv_cache_type": "unknown"}
+    log_path = Path(os.environ.get("AUTORAG_OLLAMA_LOG", "/tmp/ollama.log"))
+    if not log_path.is_file():
+        return out
+    try:
+        text = log_path.read_text(errors="replace")
+    except OSError:
+        return out
+    reqs = re.findall(r'load request="\{([^}]*)\}"', text)
+    if not reqs:
+        return out
+    last = reqs[-1]
+    requested = "unknown"
+    if fa := re.search(r"FlashAttention:(\w+)", last):
+        requested = fa.group(1)
+    # `FlashAttention:Auto` only says "let llama.cpp decide" — the effective
+    # state is in a later `llama_context` line. Resolve it so an FA row is
+    # unambiguous about whether FA was actually active during the run.
+    resolved = ""
+    if m := re.findall(r"Flash Attention was auto, set to (\w+)", text):
+        resolved = f"{m[-1].capitalize()}(auto)"
+    elif m := re.findall(r"flash_attn\s*=\s*(enabled|disabled)", text):
+        resolved = f"{m[-1].capitalize()}(forced)"
+    out["flash_attention"] = resolved or requested
+    kv = re.search(r"KvCacheType:(\S*)", last)
+    out["kv_cache_type"] = kv.group(1) if kv and kv.group(1) else "f16(default)"
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -700,7 +778,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument("--repeat", type=int, default=1)
     p.add_argument("--no-judge", action="store_true")
-    p.add_argument("--judge-model", default="qwen2.5:32b-instruct-q4_K_M")
+    # Judge scores are comparative, not absolute — only compare rows judged by
+    # the *same* model. This default changed from qwen2.5:32b-instruct-q4_K_M
+    # to gemma4:26b, so LEDGER rows at/after that switch are NOT comparable to
+    # the earlier batiai/qwen3.6-27b:q3-judged rows (see LEDGER provenance).
+    p.add_argument("--judge-model", default="gemma4:26b")
     p.add_argument("--judge-num-ctx", type=int, default=16384)
     p.add_argument("--judge-char-budget", type=int, default=48000)
     p.add_argument("--baseline", default="baseline", help="design to diff against")
@@ -835,11 +917,14 @@ def main(argv: list[str]) -> int:
             f"(avg {judge_avg(jb)}): {jb.rationale}\n"
         )
 
+    runner_cfg = _ollama_runner_cfg()
     env = {
         "git_sha": _git_sha(),
         "ollama_version": _ollama_version(),
         "gpu": _gpu_name(),
-        "ollama_num_parallel": os.environ.get("OLLAMA_NUM_PARALLEL", "unset"),
+        "ollama_num_parallel": _ollama_num_parallel(),
+        "ollama_flash_attention": runner_cfg["flash_attention"],
+        "ollama_kv_cache_type": runner_cfg["kv_cache_type"],
         "python": sys.version.split()[0],
     }
     entry = (

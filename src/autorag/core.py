@@ -143,12 +143,13 @@ class AutoRAG:
         self,
         words: list[WordSpan],
         *,
-        llm_model: str = "qwen2.5:14b-instruct-q8_0",
+        llm_model: str = "gemma4:latest",
         ollama_base_url: str | None = None,
         num_ctx_l1: int = 8192,
         num_ctx_fanout: int = 8192,
         max_concurrency: int = 4,
         min_subdivide_duration_s: float = 120.0,
+        reasoning: bool = False,
     ) -> TopicTree:
         """Run LLM topic extraction on pre-computed word spans.
 
@@ -168,6 +169,7 @@ class AutoRAG:
             num_ctx_fanout=num_ctx_fanout,
             max_concurrency=max_concurrency,
             min_subdivide_duration_s=min_subdivide_duration_s,
+            reasoning=reasoning,
         )
         return collapse_lone_children(raw)
 
@@ -321,7 +323,7 @@ class AutoRAG:
         transcript_end_s: float | None = None,
         title: str | None = None,
         provider: str = "ollama",
-        llm_model: str = "qwen2.5:14b-instruct-q8_0",
+        llm_model: str = "gemma4:latest",
         whisper_model: str = "base",
         db_path: Path | None = None,
         source_url: str | None = None,

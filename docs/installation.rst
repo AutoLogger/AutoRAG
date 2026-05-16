@@ -85,8 +85,9 @@ or the ``/viz`` page. Diarization needs an HF token:
 
 * **Ollama** — ``AUTORAG_OLLAMA_BASE_URL`` (default
   ``http://localhost:11434``) and ``AUTORAG_EMBED_MODEL`` (default
-  ``nomic-embed-text``). LLM chat uses ``qwen2.5:14b-instruct-q8_0`` by
-  default.
+  ``nomic-embed-text``). LLM chat uses ``gemma4:latest`` by
+  default (a thinking-capable model; the agent disables thinking by
+  default — see the audio-pipeline-design internals page).
 * **Hugging Face** — ``HF_TOKEN`` is required for the gated
   ``pyannote/speaker-diarization-3.1`` model. Without it, every word is
   labelled ``"0"``.

@@ -37,9 +37,20 @@ Final shape: ``{"topics": [L0]}`` with ``L0.children = [L1...]``,
 each ``L1.children = [L2...]`` or ``[]``. The L0 root is the explicit
 "what is this audio about" node.
 
-Default LLM model: ``qwen2.5:14b-instruct-q8_0``. Override via the
-``--llm-model`` flag on the CLI or the ``llm_model`` kwarg on the
-SDK methods.
+Default LLM model: ``gemma4:latest`` (8B Q4_K_M, ~9.6 GB), a
+``thinking``-capable model. Override via the ``--llm-model`` flag on
+the CLI or the ``llm_model`` kwarg on the SDK methods.
+
+All five stages do mechanical JSON extraction (boundaries, yes/no
+subdivide decisions, ``{title, summary}``), so the agent sets
+``reasoning=False`` by default — the same determinism/latency
+rationale as ``temperature=0.0``. This sends ``think: false`` to
+Ollama and suppresses gemma4's chain-of-thought preamble, which would
+otherwise be pure latency and a structured-output parse hazard.
+``reasoning`` is an overridable kwarg on ``build_topic_runnable`` /
+``build_agent`` / ``AutoRAG.generate_topics`` (default ``False``);
+pass ``reasoning=True`` to trade latency for chain-of-thought, or with
+a non-thinking model where it is a harmless no-op.
 
 Whisper backend
 ---------------

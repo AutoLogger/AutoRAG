@@ -5,7 +5,8 @@
     "args": {
       "TZ": "${localEnv:TZ:America/Los_Angeles}",
       "CLAUDE_CODE_VERSION": "latest",
-      "GIT_DELTA_VERSION": "0.18.2"
+      "GIT_DELTA_VERSION": "0.18.2",
+      "OLLAMA_VERSION": "0.24.0"
     }
   },
   "hostRequirements": {
@@ -42,19 +43,12 @@
     "source=matplotlib,target=/home/node/.config/matplotlib,type=volume",
     "source=local-share,target=/home/node/.local/share,type=volume",
     "source=/run/user/1000/wayland-0,target=/run/user/1000/wayland-0,type=bind",
-    "source=/run/user/1000/pulse,target=/run/user/1000/pulse,type=bind"
-    // "source=puppeteer-${devcontainerId}, target=/home/node/.cache/puppeteer,type=volume"
+    "source=/run/user/1000/pulse,target=/run/user/1000/pulse,type=bind",
+    // Native in-container Ollama: share the host's model store so pulls
+    // persist across rebuilds and are reused from/by a host Ollama.
+    "source=${localEnv:HOME}/.ollama,target=/home/node/.ollama,type=bind"
   ],
   "containerEnv": {
-    // "ANTHROPIC_BASE_URL": "http://host.docker.internal:11434",
-    // "ANTHROPIC_AUTH_TOKEN": "ollama",
-    // "ANTHROPIC_API_KEY": "",
-    // "ANTHROPIC_DEFAULT_OPUS_MODEL": "qwen3.5:9b-claude",
-    // "ANTHROPIC_DEFAULT_SONNET_MODEL": "qwen3.5:9b-claude",
-    // "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3.5:9b-claude",
-    // "CLAUDE_CODE_SUBAGENT_MODEL": "qwen3.5:9b-claude",
-    // "ANTHROPIC_MODEL": "qwen3.5:9b-claude",
-    // "NODE_OPTIONS": "--max-old-space-size=4096",
     "XDG_RUNTIME_DIR": "/run/user/1000",
     "PULSE_SERVER": "unix:/run/user/1000/pulse/native",
     "WAYLAND_DISPLAY": "wayland-0",
@@ -63,14 +57,19 @@
     "SEARXNG_URL": "http://host.docker.internal:80",
     "NVIDIA_VISIBLE_DEVICES": "all",
     "NVIDIA_DRIVER_CAPABILITIES": "compute,utility,graphics,video",
-    "AUTORAG_OLLAMA_BASE_URL": "http://host.docker.internal:11434",
+    "AUTORAG_OLLAMA_BASE_URL": "http://localhost:11434",
     "HF_TOKEN": "${localEnv:HF_TOKEN}",
     "UV_LINK_MODE": "copy",
     "MPLCONFIGDIR": "/home/node/.config/matplotlib"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/autorag,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace/autorag",
-  "postStartCommand": "cd /workspace/autorag && uv sync --all-extras && rm -f /home/node/.config/google-chrome/SingletonLock /home/node/.config/google-chrome/SingletonCookie /home/node/.config/google-chrome/SingletonSocket",
+  // Parallel named commands (run as remoteUser `node` — no sudo): bring up the
+  // native Ollama server and sync the workspace venv independently.
+  "postStartCommand": {
+    "ollama": "/usr/local/bin/start-ollama",
+    "workspace": "cd /workspace/autorag && uv sync --all-extras && rm -f /home/node/.config/google-chrome/SingletonLock /home/node/.config/google-chrome/SingletonCookie /home/node/.config/google-chrome/SingletonSocket"
+  },
   // "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
   "waitFor": "postStartCommand"
 }

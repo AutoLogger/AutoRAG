@@ -140,7 +140,7 @@ def generate_topics(
         help="LLM provider (ollama)",
     ),
     llm_model: str = typer.Option(
-        "qwen2.5:14b-instruct-q8_0",
+        "gemma4:latest",
         "--llm-model",
         "-m",
         help="LLM model name (uses provider default if empty)",

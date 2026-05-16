@@ -146,7 +146,7 @@ autorag generate-topics SOURCE [OPTIONS]
   --title            -t  TEXT   Clip title
   --whisper-model    -w  TEXT   Whisper model  [default: base]
   --provider         -p  TEXT   LLM provider (ollama)  [default: ollama]
-  --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
+  --llm-model        -m  TEXT   LLM model name  [default: gemma4:latest]
   --language         -l  TEXT   Whisper language code (auto-detect if empty)
   --transcription    -T  TEXT   Pre-computed word spans as a JSON string (skip Whisper)
   --persist/--no-persist        Write transcription + topics to SQLite/Chroma (default: true)
@@ -180,7 +180,7 @@ autorag blocks SOURCE [OPTIONS]
   --title            -t  TEXT   Clip title (only used on cache miss)
   --whisper-model    -w  TEXT   Whisper model  [default: base]
   --provider         -p  TEXT   LLM provider  [default: ollama]
-  --llm-model        -m  TEXT   LLM model name  [default: qwen2.5:14b-instruct-q8_0]
+  --llm-model        -m  TEXT   LLM model name  [default: gemma4:latest]
   --language         -l  TEXT   Whisper language code (auto-detect if empty)
   --db                   PATH   Override database path
 ```
@@ -230,7 +230,7 @@ Ollama is the only supported provider. It runs locally — no API key required.
 
 | Provider | Env var                      | Default model              | Notes         |
 |----------|------------------------------|----------------------------|---------------|
-| ollama   | *(none — local)*             | qwen2.5:14b-instruct-q8_0  | *(built-in)*  |
+| ollama   | *(none — local)*             | gemma4:latest              | *(built-in)*  |
 
 Ollama is invoked via [LangChain (`langchain-ollama`)](https://pypi.org/project/langchain-ollama/). The provider constructs messages with `SystemMessage`/`HumanMessage` and calls `ChatOllama.with_structured_output(schema, method="json_schema")` to enforce the topic-tree JSON schema. Embeddings are generated with `OllamaEmbeddings.embed_documents()`.
 
@@ -262,7 +262,7 @@ CREATE TABLE audio_clips (
     topics          TEXT,               -- JSON: topic list (see below)
     whisper_model   TEXT,               -- e.g. "base"
     provider        TEXT,               -- e.g. "ollama"
-    llm_model       TEXT                -- e.g. "qwen2.5:14b-instruct-q8_0"
+    llm_model       TEXT                -- e.g. "gemma4:latest"
 );
 ```
 

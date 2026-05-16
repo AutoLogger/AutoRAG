@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Default topic LLM is now `gemma4:latest`** (8B Q4_K_M, ~9.6 GB), replacing
+  `qwen2.5:14b-instruct-q8_0`, across `AutoRAG.generate_topics` /
+  `agent.build_topic_runnable` / `build_agent` and the `autorag
+  generate-topics` CLI. `gemma4:latest` is a thinking-capable model; because
+  all five stages do mechanical JSON extraction, the agent disables thinking
+  by default. New overridable `reasoning: bool = False` kwarg on
+  `build_topic_runnable` / `build_agent` / `AutoRAG.generate_topics` (sends
+  `think: false` to Ollama on thinking models; harmless no-op otherwise) —
+  pass `reasoning=True` to trade latency for chain-of-thought. The lighter
+  default also frees VRAM: the 4 agent slots + model now sit at ~11 GB on a
+  24 GB card (was ~15 GB+ for the qwen 14B).
 - The topic agent now keeps the Ollama model resident in VRAM for the whole
   run instead of cold-reloading it (~15 GB) at every stage boundary. All five
   stages share one `num_ctx` and `keep_alive="5m"` (Ollama reloads on any

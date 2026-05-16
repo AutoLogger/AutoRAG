@@ -6,6 +6,41 @@ relevant server-side knob is ``OLLAMA_NUM_PARALLEL``. The right value
 depends on whether you're tuning for parallelism or for a bigger
 single-stream model.
 
+Devcontainer defaults
+---------------------
+
+``.devcontainer/start-ollama.sh`` exports a tuned set before launching
+``ollama serve`` (each overridable — an externally-set value wins):
+
+.. code-block:: bash
+
+    OLLAMA_FLASH_ATTENTION=1
+    OLLAMA_KV_CACHE_TYPE=q8_0
+    OLLAMA_NUM_PARALLEL=4
+    OLLAMA_MAX_LOADED_MODELS=1
+
+These are server-side only; the Python agent still sets ``num_ctx`` and
+``keep_alive`` per request. Flash attention plus a ``q8_0`` KV cache
+roughly halve per-slot KV VRAM at near-lossless quality and cut
+attention memory bandwidth, so the four agent slots stay concurrent
+*and* each call runs faster. ``MAX_LOADED_MODELS=1`` pins the single
+agent LLM so it is never evicted to load a second model. The sections
+below explain the reasoning behind each value.
+
+The default agent LLM is ``gemma4:latest`` (8B Q4_K_M, ~9.6 GB), a
+``thinking``-capable model. The agent disables thinking
+(``reasoning=False``, sent to Ollama as ``think: false``) for all five
+mechanical-JSON stages — that is a client-side per-request setting, not
+a server env knob, but it is the dominant gemma4 latency lever, so it
+is noted here for anyone tuning for speed. **Validation caveat:** the
+agent-lab LEDGER's gemma4 rows were measured under Ollama's *default*
+server env (flash attention default-on, f16 KV), **not** this tuned
+``q8_0``-KV + explicit ``FLASH_ATTENTION=1`` + ``NUM_PARALLEL=4``
+combination. Gemma-family models use interleaved sliding-window
+attention, historically a sensitive pairing with flash attention in
+llama.cpp / Ollama. The settings are sound and each is overridable;
+re-run ``bench.py`` to confirm gemma4 quality holds under them.
+
 ``OLLAMA_NUM_PARALLEL``
 -----------------------
 
@@ -16,34 +51,42 @@ single-stream model.
   all ``NUM_PARALLEL`` slots' KV cache at the configured ``num_ctx``,
   so 4 idle slots steal VRAM that the bigger model needs.
 
-On a 24 GB GPU with ``NUM_PARALLEL=1``, you can run
-``qwen2.5:14b-q8_0`` (~15 GB) at the agent's ``num_ctx=8192``
-(~1.5 GB KV) with full GPU offload and headroom to spare; even a
-single-stream ``num_ctx=16384`` (~3 GB KV) fits. Pushing to
-``num_ctx=32768`` starts spilling layers onto CPU. Verify with
-``ollama ps`` after a load.
+On a 24 GB GPU the default ``gemma4:latest`` (~9.6 GB) lands at
+~11 GB total with the four slots at ``num_ctx=8192`` and the ``q8_0``
+KV cache — full GPU offload with wide headroom. The
+``NUM_PARALLEL=1`` case now applies to the bigger ``gemma4:26b`` (the
+25.8B sibling, ~17 GB): a single stream gets the freed slot KV at
+``num_ctx=8192`` with full offload, and a single-stream
+``num_ctx=16384`` still fits. Verify with ``ollama ps`` after a load.
 
 ``OLLAMA_FLASH_ATTENTION`` and ``OLLAMA_MULTIUSER_CACHE``
 ---------------------------------------------------------
 
-**Do not** combine ``OLLAMA_FLASH_ATTENTION=1`` with
-``OLLAMA_MULTIUSER_CACHE=true`` and concurrent slots — it triggers::
+Flash attention is on by default (see *Devcontainer defaults*), which
+also unlocks the ``q8_0`` KV cache. **Do not** combine
+``OLLAMA_FLASH_ATTENTION=1`` with ``OLLAMA_MULTIUSER_CACHE=true`` and
+concurrent slots — it triggers::
 
     GGML_ASSERT(is_full && "seq_cp() is only supported for full KV buffers")
 
-Drop ``MULTIUSER_CACHE``. The per-slot prefix cache still works
-without it, which is what the agent's K identical summary prompts
-benefit from.
+Because the devcontainer ships ``FLASH_ATTENTION=1`` with
+``NUM_PARALLEL=4`` (concurrent slots), ``MULTIUSER_CACHE`` must stay
+unset — ``start-ollama.sh`` deliberately omits it. The per-slot prefix
+cache still works without it, which is what the agent's K identical
+summary prompts benefit from.
 
 Per-slot KV-cache sizing
 ------------------------
 
 Every stage uses the same context size — ``num_ctx=8192`` — chosen to
 fit the typical "4 slots × KV + ~9 GB model" budget on a 24 GB card.
-A uniform ``num_ctx`` is deliberate: Ollama reloads a model whenever
-``num_ctx`` changes between requests, so keeping it constant is what
-lets the model stay resident across all five stages (see *Model
-residency during a run* below).
+With the default ``q8_0`` KV cache each slot's KV is roughly half its
+f16 size, so that budget now has noticeably more headroom than the
+original f16 sizing (which left it tight). A uniform ``num_ctx`` is
+deliberate: Ollama reloads a model whenever ``num_ctx`` changes
+between requests, so keeping it constant is what lets the model stay
+resident across all five stages (see *Model residency during a run*
+below).
 
 ``num_ctx_l1`` remains an overridable kwarg
 (:func:`autorag.agent.build_topic_runnable` /
@@ -54,9 +97,9 @@ Raising ``num_ctx_l1`` back to e.g. ``16384`` fixes that, at the cost
 of exactly one model reload at the Stage 2→3a boundary (the L1 call
 then differs in ``num_ctx`` from the fan-out stages).
 
-These values are conservative enough that bumping the LLM to
-``qwen2.5:32b-q4_K_M`` typically just needs ``NUM_PARALLEL=1`` and no
-other changes.
+These values are conservative enough that bumping the LLM to the
+bigger ``gemma4:26b`` (~17 GB) typically just needs ``NUM_PARALLEL=1``
+and no other changes.
 
 Model residency during a run
 ----------------------------

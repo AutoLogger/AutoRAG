@@ -38,7 +38,7 @@ extraction, persist everything.
     autorag generate-topics SOURCE [OPTIONS]
 
     --provider      -p  TEXT     LLM provider [default: ollama]
-    --llm-model     -m  TEXT     LLM model [default: qwen2.5:14b-instruct-q8_0]
+    --llm-model     -m  TEXT     LLM model [default: gemma4:latest]
     --transcription -T  TEXT     Pre-computed WordSpan JSON (skip Whisper)
     --persist/--no-persist       Write transcription + topics to
                                  SQLite/Chroma (default: true).
