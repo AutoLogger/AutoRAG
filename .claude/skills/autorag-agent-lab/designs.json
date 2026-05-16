@@ -1,0 +1,32 @@
+{
+  "baseline": {
+    "description": "Current shipped defaults (src/autorag/agent.py build_topic_runnable).",
+    "knobs": {
+      "llm_model": "qwen2.5:14b-instruct-q8_0",
+      "num_ctx_l1": 8192,
+      "num_ctx_fanout": 8192,
+      "max_concurrency": 4,
+      "min_subdivide_duration_s": 120.0
+    },
+    "prompt_override": null
+  },
+  "qwen2.5-7b": {
+    "description": "Smaller model — expect lower VRAM + faster, watch quality.",
+    "knobs": {
+      "llm_model": "qwen2.5:7b-instruct-q8_0"
+    },
+    "prompt_override": null
+  },
+  "no-subdivide": {
+    "description": "Ablation: never build L2 (min_subdivide_duration_s = inf). Isolates the cost/quality of the L2 layer.",
+    "knobs": {
+      "min_subdivide_duration_s": 1e9
+    },
+    "prompt_override": null
+  },
+  "terse-l1": {
+    "description": "Example prompt variant: a tighter L1 boundary system prompt (see prompts/terse_l1.py).",
+    "knobs": {},
+    "prompt_override": "prompts/terse_l1.py"
+  }
+}

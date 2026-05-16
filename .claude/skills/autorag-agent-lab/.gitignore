@@ -1,0 +1,5 @@
+# Derived / regenerable — never commit. The committed deliverables are
+# SKILL.md, bench.py, designs.json, LEDGER.md, and prompts/.
+fixtures/
+runs/
+__pycache__/
